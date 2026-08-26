@@ -1,0 +1,9 @@
+.tools/
+.cache/
+dist/
+**/bin/
+**/obj/
+*.user
+*.secret
+*.env
+connection.json
