@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "panel-windows",
+  "description": "Only local bundled windows may listen to application events.",
+  "windows": ["widget", "detail", "settings"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

@@ -7,3 +7,8 @@ dist/
 *.secret
 *.env
 connection.json
+
+node_modules/
+web-dist/
+target/
+src-tauri/gen/

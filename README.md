@@ -1,76 +1,65 @@
-# Keeper UsagePanel
+# Keeper UsagePanel 0.2.0
 
-Windows 10/11 置顶悬浮球，**直接调用已有 Keeper API**。不安装远端服务、不读写远端数据库、不改变 Keeper / CPA / Usage-Sync 部署。
+面向 Windows 10 / 11 x64 的 Keeper 置顶悬浮球。Tauri 2 + Rust + HTML/CSS，直接连接既有 Keeper，不安装远程适配服务，不启动本地 HTTP 服务。
 
-初版 `0.1.0`，接口兼容基线：Keeper `1.14.8`。
+![浅色界面，示例数据](docs/overview-light.png)
 
 ## 使用
 
-1. 运行 `KeeperUsagePanel.exe`（Windows x64 自包含版，无需另外安装 .NET，无需管理员权限）。
-2. 首次启动填写 **Keeper 完整地址**，例如 `https://keeper.example/usage`。不预置服务器地址；应使用这台 Windows 已能访问的 Keeper 地址。
-3. Keeper 启用认证时，填写 **Keeper 登录密码**，不是 sk。可选择记住密码。
-4. 保存后自动连接；以后启动读取当前用户注册表。右键悬浮球或通过托盘可以重新设置。
+推荐运行 `Keeper UsagePanel_0.2.0_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
 
-公网使用 HTTPS。若使用受保护的专网 HTTP，需在设置中明确勾选允许；不要将密码经不可信明文网络传输。服务器自己的 `127.0.0.1` 地址不能直接当作 Windows 访问地址。
+首次启动填写完整 Keeper 地址，例如 `https://keeper.example/usage`，以及 Keeper 登录密码（不是 sk）。保存前验证登录。配置写入 `HKCU\Software\KeeperUsagePanel`，兼容 0.1.0 的地址、密码和位置配置。
 
-配置保存位置：`HKEY_CURRENT_USER\Software\KeeperUsagePanel`。包括地址、刷新间隔、窗口位置和偏好。记住密码时，`ProtectedPassword` 是 Windows 当前用户 DPAPI 加密的二进制值，**不保存明文密码**。会话 Cookie 仅在内存中使用。不需要连接 JSON 文件。
+- 圆球：北京时间今日 Token，全局统计。
+- 侧边胶囊：上次成功采样到本次成功采样的输入 / 输出增量，默认 2 秒。没有新增显示 0，建立基线或断线显示 —；不是每秒速率。
+- 细环与短文字：健康、波动、异常、安静；连接故障明确显示离线。
+- 悬停展开详情，离开两窗后收起；球与面板间保留穿越区域。拖动移动，靠近边缘时吸附并记住位置。
+- 点击圆球也能展开；右键或托盘可设置、隐藏、退出。详情 Esc 收起，设置 Esc 关闭。
+- 今日 / 近 7 天 / 近 30 天 / 昨日 / 本月 / 自定义日期，可按 Key 查看；不改变圆球的全局口径。
+- 总览、成本、延迟、用量分布，以及认证账户的概览、额度历史、请求明细和错误事件。只显示数值、表格与事件摘要，不显示图表。
 
-## 悬浮球
+## 代理与字体
 
-- 北京时间今日全部 Key 的 Token 总量。
-- 相邻两次**成功采样**之间的输入 / 输出 Token 增量，默认 2 秒刷新；它是这一段时间的数量，不是 Token/s。
-- 健康、波动、异常、安静等结论。断线显示离线，不沿用旧的健康标签。
-- 首次采样显示 `—` 并建立基线；下一次开始显示增量。无新增用量显示 `+0`。
-- 失败采样不更新基线；恢复后显示整个实际间隔的增长。跨午夜补读上一日期末值，再与新日期累计合并。累计回退则重新建立基线，不显示负数。
+设置中展开「代理设置」，留空表示直连，不继承环境变量代理。
 
-计算示例：前一次累计输入 1,000、输出 100，2 秒后累计输入 1,500、输出 160，显示 `入 +500 / 出 +60`。
+- `http://127.0.0.1:7890`、`https://proxy.example:8443`
+- `socks5://127.0.0.1:1080`（客户端解析目标 DNS）
+- `socks5h://127.0.0.1:1080`（代理解析目标 DNS）
+- 需要认证时：`scheme://用户名:密码@主机:端口`，特殊字符需 URL 编码。所有 Keeper 请求使用同一个代理，不失败回退直连。
 
-此增量来自 Keeper 已记录的日累计变化，不是模型流式生成直播。回填到已经关闭、且不在跨日补读范围内的更早日期，不会变成本轮实时用量。程序重启建立新基线，不把退出期间的历史一次性显示成短间隔增量。
+悬浮球字体可填本机字体名称。默认 `HarmonyOS Sans SC`；不存在时依次回退 `Microsoft YaHei UI`、`Microsoft YaHei`、`Noto Sans CJK SC`、系统 sans-serif。自定义字体缺失时先回退鸿蒙黑体，再走上述序列。不内置或下载鸿蒙字体。详情的拉丁数字使用随包的 Manrope，中文使用系统字体。
 
-健康取 Keeper 所有可见凭证类型返回的五小时健康数据，先合计成功 / 失败，再套用 Keeper 动态成功率阈值；不按 Key 分开，也不平均账户状态。健康覆盖 Keeper 当前可见账户，不能代表已经删除或无法归属的凭证。账户健康缓存约 10 秒，今日用量按配置间隔读取。
+## 配置与安全
 
-## 悬停面板
+`Endpoint`、`PollSeconds`、`RememberPassword`、`AllowPrivateHttp`、`AutoStart`、`Theme`、`WidgetFont`、`X`、`Y` 保存为注册表值。可选登录密码 `ProtectedPassword` 和代理地址 `ProtectedProxyUrl` 使用 Windows DPAPI 当前用户加密。
 
-鼠标停留在球、面板或其下拉菜单时保持展开；离开后约 280ms 收起。从球跨入面板不会立即消失。球可拖动和贴边，面板自动向屏幕内侧展开；支持托盘隐藏、恢复、退出以及可选开机启动。
+不把登录密码返回给前端；设置显示「已保存，留空继续使用」。会话 Cookie 只驻留 Rust 内存。HTTPS 校验证书，不关闭证书校验。非本机 HTTP 需显式勾选专网确认。界面仅加载内置资源；开发用示例数据不会打入 EXE。图标使用用户提供的 Keeper SVG。
 
-面板默认“今日 / 全部 Key”，支持昨日、近 7 天、近 30 天、本月和自定义日期。面板筛选不改变悬浮球的全局口径。
+## 统计边界
 
-| 视图 | 内容 |
-| --- | --- |
-| 总览 | 请求数、成功失败、成功率、Token 总量与输入/输出/缓存/推理组成、缓存率、估算成本 |
-| 成本 | 普通输入、缓存读、缓存写、输出成本；模型每请求成本、输出量与缓存率 |
-| 延迟 | 首 Token 和请求总耗时的 P95 / 最大值，样本数与缺失说明 |
-| 分布 | 模型、Key、认证账户、提供商的请求数、Token、占比与成本表格 |
-| 账户概览 | 累计请求/Token/成功率/缓存率、身份信息、最近使用、五小时健康、当前配额与套餐 |
-| 额度历史 | 主/次配额周期、额度变化、Token / 成本与每百分点效率 |
-| 请求明细 | 日期 + Key + 账户筛选，游标分页，Token 分项、结果、成本与延迟 |
-| 错误事件 | Keeper 返回的错误摘要、HTTP / 错误码、可重试与重试时间，游标分页 |
+- 适配 Keeper 1.14.8 的 `/api/v1` 接口。Keeper 时区需为 `Asia/Shanghai`。Windows 的本地时区不影响北京时间口径。
+- 增量从相邻成功采样的今日累计值做差；失败不更新基线。跨午夜读取旧日期的 analysis 汇总接续，无法接续或计数倒退时重新建立基线。重启不回放历史增量。
+- 今日之外的详情使用 overview / analysis 的日期范围；缓存和推理属于子项，不重复计入 Token 总量。
+- 健康复用 Keeper 凭据健康的五小时窗口与阈值，聚合可见身份；删除或无法映射的身份不在该窗口覆盖内。
+- 成本是 Keeper 价格配置的 API 等价估算，不等于订阅真实扣费；价格缺失显示 —。
+- 账户概览是累计统计；额度及额度历史属于账户共享数据，不按日期 / Key 拆分。只读配额缓存，不触发上游配额刷新。
+- 请求明细按日期、Key、账户筛选。错误接口不支持日期 / Key 查询，因此日期在当前游标页内筛选，明确显示本页条数；不能视为日期范围总数。
+- 断线后的下一次成功增量可能覆盖较长间隔，显示实际秒数。历史回填到已关闭日期不保证包含在实时增量中。
 
-仅显示单值指标和表格，不显示曲线、散点、热图或趋势线。
-
-### 统计边界
-
-- 输入包含缓存，输出包含推理；这些子项不重复加到总 Token。
-- 缓存率为汇总缓存读取 / 汇总输入，分母为零显示 `—`。
-- 成本沿用 Keeper 定价，是 API 等价估算；缺价格不显示为零，订阅同步不代表实际扣费。
-- 账户累计概览、当前额度、配额周期不受外层日期 / Key 筛选影响，界面会注明。
-- 错误 API 不支持日期或 Key 筛选。客户端对当前游标页按日期筛选，只显示**本页条数**，不冒充日期范围总数；需要更早记录时翻页。错误事件与失败请求数不能相加。
-- 延迟诊断仅支持 Keeper 最近 30 天有效样本，零 / 缺失延迟不是瞬时完成。
-- 默认今日口径要求 Keeper 配置 `Asia/Shanghai`。Windows 系统时区可以不同，展示仍使用北京时间。
-- Keeper 保存多少历史，就显示多少；不补出未观察到的额度历史。
-
-## 构建和测试
-
-需要 .NET 10 SDK。核心测试不依赖 Windows；界面运行只支持 Windows。
+## 开发
 
 ```sh
-dotnet run --project desktop/KeeperUsagePanel.Core.Tests -c Release
-dotnet build desktop/KeeperUsagePanel/KeeperUsagePanel.csproj -c Release
-dotnet publish desktop/KeeperUsagePanel/KeeperUsagePanel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o dist/windows-x64
+npm ci
+npm run dev          # 前端
+npm run tauri dev    # Windows 桌面开发
+npm test
+cargo test -p keeper-core
+npm run test:ui      # CHROMIUM_PATH 可指定浏览器
+npm run tauri build -- --target x86_64-pc-windows-msvc
 ```
 
-GitHub Actions 在 Windows runner 上执行核心测试、编译并生成 EXE artifact。EXE 不包含任何服务器地址、密码或凭据。初版未代码签名，Windows 可能提示未知发布者。
+浏览器开发预览：`http://127.0.0.1:1420/?preview=1`，加 `theme=dark`、`state=empty|offline|long`、`window=settings` 检查界面状态。预览显式标注示例数据，不连接真实 Keeper，不写注册表。
 
-## 验收状态
+Linux 交叉编译可使用 `bash scripts/build-linux.sh`，需要 Rust Windows MSVC target、LLVM、cargo-xwin 0.23+、NSIS。默认使用 clang 与预制 Windows sysroot，限制为单编译任务，并降低生成式 Windows 绑定库的优化级别，减少小内存机器的构建开销。GitHub Actions 使用 Windows runner 构建安装版与便携版。
 
-见 [VERIFICATION.md](VERIFICATION.md) 和 [Windows 验收清单](WINDOWS-ACCEPTANCE.md)。Linux 上的成功编译、模拟接口测试和 HK 本机 API 验证，均不等同于 Windows 窗口行为或 Windows 到 Keeper 网络链路已验收。
+见 [Windows 验收清单](WINDOWS-ACCEPTANCE.md)、[验证记录](VERIFICATION.md)、[设计说明](docs/DESIGN.md)。

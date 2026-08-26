@@ -1,34 +1,19 @@
-# 0.1.0 验证记录
+# 验证记录 · 0.2.0
 
-日期：2026-08-26，北京时间。最终结构为 **WPF EXE 直连 Keeper**，无远端适配服务。
+## 本轮已完成
 
-## 实际 Keeper 接口
+- 前端生产构建成功；示例数据及预览脚本只在 Vite 开发模式启用。
+- Chromium 实际渲染浅色 / 深色、五个指标页、四个账户子页、日期 / Key 筛选、空状态、断线、长名称、长错误文本与设置页；脚本结束关闭浏览器和服务器。
+- 5 项 JavaScript 格式化与字体回退检查通过。
+- 13 项 Rust 核心检查通过：相邻采样增量、零增量、跨午夜接续、重置、64 位精度、健康阈值、登录及 Cookie、失败采样保留基线、日期 / Key 传递、账户只读接口、错误游标页范围、HTTP 代理路由、SOCKS5H 实际握手与代理端 DNS、代理地址校验。
+- 用户指定 SVG 已用于界面及 Windows 图标。字号调整后在 200 × 84 DIP 组件内检查无横向溢出。
 
-17:43 在 HK 机本机访问现有 Keeper 1.14.8，登录后执行只读业务接口并退出测试会话。下列接口均返回 200（登录/退出为 204）：
+## Windows 构建
 
-- usage/activity?window=today：今日输入、输出、总 Token；确认窗口起点为北京时间零点，连续两次查询无新增时增量为 0。
-- usage/identities/page：全类型五小时健康、账户分页。
-- usage/api-keys/options：返回 3 个 Key 选项。
-- usage/overview：全局与单 Key 查询。
-- usage/analysis?range=30d：Token 分项、成本拆分、模型效率与分布字段齐全。
-- usage/analysis/latency：延迟诊断。
-- quota/cache：只读取已有缓存，没有触发刷新。
-- quota/history：主额度历史。
-- usage/events：指定账户的请求明细。
-- usage/identities/:id/errors：账户错误事件。
+构建进行中，最终打包结果与哈希在交付时补充。
 
-观测到 1 个账户。HK 本机 API 单次约 1–72 ms；这不是 Windows 客户端端到端延迟指标。本次 API 快速采样的输入/输出增量均为零，不宣称已用真实新增记录完成 Windows 端增量验收。
+## 证据边界
 
-远端部署路线已取消：仅曾创建一个空目录，未上传文件、未安装或启动新服务；空目录已删除。原有 Keeper / CPA / Usage-Sync 未修改。
+浏览器预览使用明确标注的示例数据，不代表 Windows 原生窗口已运行。注册表 / DPAPI、置顶、悬停跨窗、拖动吸附、托盘、多屏 DPI、安装器和 Windows 实际代理网络仍需运行 EXE 按 WINDOWS-ACCEPTANCE.md 验收。
 
-## 自动检查
-
-核心测试覆盖直接 Keeper 路由、登录会话、相邻累计差值、跨日补偿、无新增、失败不更新基线、累计回退、健康阈值、Key 筛选、错误分页日期边界、北京时间与数字格式。
-
-最终本地检查：24 项核心检查通过；WPF Release 编译 0 警告、0 错误；Windows x64 自包含单文件发布成功，产物识别为 PE32+ Windows GUI x86-64。EXE 约 166 MiB，包含 .NET 桌面运行时；压缩包更适合传输。
-
-源码包含 Windows CI 工作流；尚未宣称 GitHub Actions 执行成功。Linux 编译不能证明 Windows UI 实际运行效果。
-
-## 尚待 Windows 实机验收
-
-首次配置窗口、注册表落盘 / DPAPI、置顶与鼠标焦点、混合 DPI / 多屏、休眠恢复、Windows 到 Keeper 的实际连接。使用 [WINDOWS-ACCEPTANCE.md](WINDOWS-ACCEPTANCE.md) 验收。
+0.1.0 曾在 2026-08-26 17:43（北京）只读验证 HK 机 Keeper 1.14.8 的真实接口。那是旧实现的接口证据，不作为本轮 Rust 客户端已完成真实连通验收的结论。本轮网络集成测试使用本机 HTTP / SOCKS 测试服务，无远程变更。本轮真实 Rust 登录验证因凭据读取未获授权而未执行，临时回环端口转发已关闭。

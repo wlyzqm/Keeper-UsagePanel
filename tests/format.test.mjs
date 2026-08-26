@@ -1,0 +1,41 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  compact,
+  number,
+  percent,
+  duration,
+  cost,
+  escape,
+  time,
+  widgetFontStack,
+} from "../src/format.js";
+test("compact numbers preserve trailing integer zeroes", () => {
+  assert.equal(compact(100000), "100K");
+  assert.equal(compact(10000), "10K");
+  assert.equal(compact(8426190), "8.43M");
+  assert.equal(compact(0), "0");
+  assert.equal(compact(null), "—");
+});
+test("missing values are not invented zeros", () => {
+  assert.equal(number(null), "—");
+  assert.equal(percent(0, 0), "—");
+  assert.equal(duration(0), "—");
+  assert.equal(cost({ cost_usd: 0 }), "—");
+  assert.equal(cost({ cost_usd: 0, cost_available: true }), "$0.00");
+});
+test("untrusted Keeper labels are escaped", () => {
+  assert.equal(escape("<script>\"&'"), "&lt;script&gt;&quot;&amp;&#39;");
+});
+test("timestamps always use Beijing", () => {
+  assert.equal(time("2026-08-26T00:00:00Z"), "08/26 08:00:00");
+});
+test("widget defaults to HarmonyOS and preserves Chinese fallbacks", () => {
+  assert.ok(widgetFontStack().startsWith('"HarmonyOS Sans SC"'));
+  assert.ok(
+    widgetFontStack("Example Font").startsWith(
+      '"Example Font","HarmonyOS Sans SC"',
+    ),
+  );
+  assert.ok(widgetFontStack().includes('"Microsoft YaHei"'));
+});

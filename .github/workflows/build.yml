@@ -11,12 +11,22 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-node@v4
         with:
-          dotnet-version: '10.0.x'
-      - run: dotnet run --project desktop/KeeperUsagePanel.Core.Tests -c Release
-      - run: dotnet publish desktop/KeeperUsagePanel/KeeperUsagePanel.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o dist/windows-x64
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: cargo test -p keeper-core --locked
+      - run: cargo test -p keeper-usage-panel --bin KeeperUsagePanel --locked
+      - run: npm run tauri build -- --target x86_64-pc-windows-msvc
+        env:
+          CARGO_BUILD_JOBS: '2'
       - uses: actions/upload-artifact@v4
         with:
           name: KeeperUsagePanel-windows-x64
-          path: dist/windows-x64/
+          path: |
+            target/x86_64-pc-windows-msvc/release/KeeperUsagePanel.exe
+            target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe

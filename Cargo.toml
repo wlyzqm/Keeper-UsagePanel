@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/keeper-core", "src-tauri"]
+resolver = "2"
+
+[profile.release]
+opt-level = "s"
+strip = true
+debug = 0
+codegen-units = 16
+
+# Windows bindings contain generated wrappers; avoid expensive optimization of
+# this large dependency when cross-compiling on a small build machine.
+[profile.release.package.windows]
+opt-level = 0
+codegen-units = 256
+
+[profile.dev]
+debug = 0
+incremental = false
