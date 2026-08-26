@@ -14,6 +14,9 @@ export function compact(v) {
   if (v == null) return "—";
   const n = Number(v);
   for (const [size, suffix] of [
+    [1e18, "E"],
+    [1e15, "P"],
+    [1e12, "T"],
     [1e9, "B"],
     [1e6, "M"],
     [1e3, "K"],

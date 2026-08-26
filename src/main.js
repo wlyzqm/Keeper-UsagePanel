@@ -1,6 +1,7 @@
 import "./style.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { WidgetDeltaDisplay } from "./widget-state.js";
 import { icon } from "./icons.js";
 import {
   escape as e,
@@ -24,6 +25,7 @@ let api = {
   on: async (name, fn) => listen(name, (event) => fn(event.payload)),
 };
 if (preview) api = (await import("./preview.js")).createPreview(search);
+const widgetDelta = new WidgetDeltaDisplay();
 const state = {
   settings: { pollSeconds: 2, theme: "light" },
   sample: null,
@@ -90,22 +92,33 @@ const note = (text) =>
   `<div class="note">${icon("info")}<p>${e(text)}</p></div>`;
 const rows = (items) =>
   `<div class="rows-card">${items.map(([label, value]) => `<div class="metric-row"><span>${e(label)}</span><strong class="num">${e(value)}</strong></div>`).join("")}</div>`;
-const cards = (items, three = false) =>
-  `<div class="metric-grid ${three ? "three" : ""}">${items.map(([label, value, hint, mark]) => `<div class="metric-card"><div class="metric-label">${mark ? icon(mark) : ""}${e(label)}</div><div class="metric-value num ${String(value).length > 13 ? "small" : ""}">${e(value)}</div>${hint ? `<p>${e(hint)}</p>` : ""}</div>`).join("")}</div>`;
+const cards = (items, columns = 2) =>
+  `<div class="metric-grid columns-${columns}">${items.map(([label, value, hint, mark]) => `<div class="metric-card"><div class="metric-label">${mark ? icon(mark) : ""}${e(label)}</div><div class="metric-value num" title="${e(value)}">${e(value)}</div>${hint ? `<p title="${e(hint)}">${e(hint)}</p>` : ""}</div>`).join("")}</div>`;
 const heading = (text, right = "") =>
   `<div class="group-title"><span>${e(text)}</span><span class="muted">${e(right)}</span></div>`;
-const table = (headers, items) =>
+const table = (headers, items, kinds = []) =>
   items.length
-    ? `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map((h) => `<th>${e(h)}</th>`).join("")}</tr></thead><tbody>${items.map((row) => `<tr>${row.map((v) => `<td>${e(v ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+    ? `<div class="table-wrap" tabindex="0" role="region" aria-label="${e(headers[0])}明细表，可横向滚动"><table class="data-table"><thead><tr>${headers.map((h, i) => `<th scope="col" class="cell-${kinds[i] || (i ? "number" : "name")}">${e(h)}</th>`).join("")}</tr></thead><tbody>${items
+        .map(
+          (row) =>
+            `<tr>${row
+              .map((v, i) => {
+                const kind = kinds[i] || (i ? "number" : "name");
+                const lines = Array.isArray(v) ? v : [v ?? "—"];
+                return `<td class="cell-${kind}"><span class="cell-content" title="${e(lines.join(" / "))}">${lines.map((line) => `<span class="cell-line">${e(line)}</span>`).join("")}</span></td>`;
+              })
+              .join("")}</tr>`,
+        )
+        .join("")}</tbody></table></div>`
     : `<div class="rows-card empty-inline">此范围暂无记录</div>`;
 const picker = (name, label, options, selected, extra = "") =>
   `<details class="picker ${extra}"><summary aria-label="${name === "key" ? "按 Key 筛选" : name === "range" ? "更多日期范围" : name === "account" ? "选择认证账户" : "切换分布维度"}">${name === "key" ? icon("key") : ""}<span class="picker-label">${e(label)}</span>${icon("chevron")}</summary><div class="picker-menu">${options.map(([value, text]) => `<button data-pick="${name}" data-value="${e(value)}" class="${String(value) === String(selected) ? "selected" : ""}" title="${e(text)}">${e(text)}</button>`).join("")}</div></details>`;
 
 function widget() {
-  return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 全局用量，悬停查看详情，拖动移动"><div class="orb neutral"><div class="orb-label">今日 TOKEN</div><div class="orb-number num" id="today-total">—</div><div class="orb-health" id="health"><i class="dot"></i>未连接</div></div><div class="widget-flows"><div class="flow-row green">${icon("input")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row">${icon("output")}<span>输出</span><strong class="num" id="delta-output">—</strong></div><div class="widget-interval" id="interval-label">等待首次采样</div></div></div></div>`;
+  return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 全局用量，悬停查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div></div></div>`;
 }
 function panel() {
-  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div><div class="brand-title">Keeper<span style="font-weight:400;color:var(--muted);font-size:12px;letter-spacing:0;margin-left:8px">用量面板</span></div><div class="brand-caption">A LITTLE WINDOW INTO YOUR USAGE</div></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div>${button("settings", "连接设置")}${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${tabs.map(([id, label, i]) => `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`).join("")}</nav></header><div id="connection-banner" hidden></div><section class="panel-content" id="content" aria-live="polite"></section><footer class="panel-footer"><span class="footer-lock">${icon("shield")}只读连接 · 北京时间</span><button data-action="refresh" id="updated-at">${icon("refresh")}等待采样</button></footer></main></div>`;
+  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div>${button("settings", "连接设置")}${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${tabs.map(([id, label, i]) => `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`).join("")}</nav></header><div id="connection-banner" hidden></div><section class="panel-content" id="content" aria-live="polite"></section><footer class="panel-footer"><span class="footer-lock">${icon("shield")}只读 · 北京时间</span><button data-action="refresh" id="updated-at">${icon("refresh")}等待采样</button></footer></main></div>`;
 }
 function renderFilters() {
   const more = !["today", "7d", "30d"].includes(state.range);
@@ -133,9 +146,14 @@ function summary(data) {
     a = data.activity || {};
   return (
     scope() +
-    `<div class="metric-hero"><div><div class="metric-label">Token 总用量</div><div class="hero-value num" title="${number(usage.total_tokens)}">${compact(usage.total_tokens)}</div><div class="metric-foot">${number(usage.total_tokens)} tokens</div></div><div><div class="metric-label">Keeper 请求总数</div><div class="hero-value secondary-value num">${number(usage.total_requests)}</div><div class="metric-foot">成功率 ${percent(usage.success_count, usage.total_requests)}</div></div></div>` +
     cards(
       [
+        ["Token 总量", compact(usage.total_tokens), number(usage.total_tokens)],
+        [
+          "请求总数",
+          number(usage.total_requests),
+          `成功率 ${percent(usage.success_count, usage.total_requests)}`,
+        ],
         [
           "缓存读取率",
           percent(sum.cache_read_tokens, sum.input_tokens),
@@ -143,7 +161,7 @@ function summary(data) {
         ],
         ["总成本", cost(sum, "total_cost"), "API 等价估算", "cost"],
       ],
-      false,
+      4,
     ) +
     heading("Token 组成", "子项不重复计入总量") +
     rows([
@@ -161,7 +179,7 @@ function summary(data) {
 function liveSummary() {
   const s = state.sample;
   if (!s) return note("下一次成功采样后显示全局新增用量。");
-  return `<div class="live-strip">${icon("shield")}<div><strong>全局${e(s.health.label)} <span style="font-weight:400;opacity:.7">· 近 5 小时失败 ${number(s.health.failure)} 次</span></strong><p>${state.error ? "连接中断，等待重新采样" : s.delta.baseline ? "采样基线已建立，等待下一次更新" : `${Number(s.delta.seconds).toFixed(1)} 秒新增：输入 ${number(s.delta.input_tokens)} · 输出 ${number(s.delta.output_tokens)}`}</p></div></div>`;
+  return `<div class="live-strip">${icon("shield")}<div><strong>全局${e(s.health.label)} <span>· 近 5 小时失败 ${number(s.health.failure)} 次</span></strong><p>${state.error ? "连接中断，等待重新采样" : s.delta.baseline ? "采样基线已建立，等待下一次更新" : `${Number(s.delta.seconds).toFixed(1)} 秒新增：输入 ${number(s.delta.input_tokens)} · 输出 ${number(s.delta.output_tokens)}`}</p></div></div>`;
 }
 function costs(data) {
   const b = data.cost_breakdown || {};
@@ -267,38 +285,28 @@ function accountBody(account, data) {
   if (state.accountTab === "quota") {
     let html =
       note("账户累计概览与当前配额，不受上方日期 / Key 筛选影响。") +
-      cards([
+      cards(
         [
-          "累计 Token",
-          compact(account.total_tokens),
-          `${number(account.total_tokens)} tokens`,
+          [
+            "累计 Token",
+            compact(account.total_tokens),
+            `${number(account.total_tokens)} tokens`,
+          ],
+          ["累计请求", number(account.total_requests)],
+          [
+            "累计成功率",
+            percent(
+              account.success_count,
+              (account.success_count || 0) + (account.failure_count || 0),
+            ),
+          ],
+          [
+            "累计缓存率",
+            percent(account.cache_read_tokens, account.input_tokens),
+          ],
         ],
-        ["累计请求", number(account.total_requests)],
-        [
-          "累计成功率",
-          percent(
-            account.success_count,
-            (account.success_count || 0) + (account.failure_count || 0),
-          ),
-        ],
-        [
-          "累计缓存率",
-          percent(account.cache_read_tokens, account.input_tokens),
-        ],
-      ]) +
-      heading("账户信息") +
-      rows([
-        [
-          "提供商 / 类型",
-          `${account.provider || "—"} / ${account.type || "—"}`,
-        ],
-        ["状态", account.disabled ? "已禁用" : "已启用"],
-        ["最近使用", time(account.last_used_at)],
-        [
-          "近 5 小时成功 / 失败",
-          `${number(account.credential_health?.total_success)} / ${number(account.credential_health?.total_failure)}`,
-        ],
-      ]) +
+        4,
+      ) +
       heading("当前配额", "只读已有缓存");
     let any = false;
     for (const item of data.items || []) {
@@ -319,13 +327,28 @@ function accountBody(account, data) {
             number(m.window_usage_tokens),
             money(m.window_usage_cost),
           ]),
+          ["name", "text", "time", "number", "number"],
         ) +
         note(
           `最近观测 ${time(item.refreshed_at)} · 套餐 ${item.quota?.subscription?.plan || "—"}`,
         );
     }
     return (
-      html + (any ? "" : note("暂无已缓存的配额，本工具不会主动刷新上游额度。"))
+      html +
+      (any ? "" : note("暂无已缓存的配额，本工具不会主动刷新上游额度。")) +
+      heading("账户信息") +
+      rows([
+        [
+          "提供商 / 类型",
+          `${account.provider || "—"} / ${account.type || "—"}`,
+        ],
+        ["状态", account.disabled ? "已禁用" : "已启用"],
+        ["最近使用", time(account.last_used_at)],
+        [
+          "近 5 小时成功 / 失败",
+          `${number(account.credential_health?.total_success)} / ${number(account.credential_health?.total_failure)}`,
+        ],
+      ])
     );
   }
   if (state.accountTab === "quota-history") {
@@ -351,12 +374,13 @@ function accountBody(account, data) {
         ["状态", "开始 / 重置", "初始 / 最近剩余", "请求", "Token", "成本"],
         cycles.map((c) => [
           c.status === "current" ? "当前" : "已结束",
-          `${time(c.window_started_at)} / ${time(c.reset_at)}`,
+          [time(c.window_started_at), time(c.reset_at)],
           `${c.first_remaining_percent ?? "—"}% / ${c.last_remaining_percent ?? "—"}%`,
           number(c.usage?.requests),
           number(c.usage?.total_tokens),
           cost(c.usage, "total_cost_usd"),
         ]),
+        ["text", "time", "text", "number", "number", "number"],
       ) +
       heading("额度变化效率") +
       table(
@@ -370,6 +394,7 @@ function accountBody(account, data) {
             number(t.tokens_per_point),
             cost(t, "cost_per_point", "cost_per_point_available"),
           ]),
+        ["time", "text", "number", "number", "number"],
       ) +
       note("未观测到的日期不补零，百分点不等同于 Token。")
     );
@@ -377,7 +402,7 @@ function accountBody(account, data) {
   if (state.accountTab === "requests")
     return (
       note("按所选日期、Key 与当前账户筛选，不读取原始请求正文。") +
-      heading("请求明细") +
+      heading("请求明细", "横向滚动查看完整指标") +
       table(
         [
           "时间（北京）",
@@ -405,6 +430,19 @@ function accountBody(account, data) {
           duration(m.ttft_ms),
           duration(m.latency_ms),
         ]),
+        [
+          "time",
+          "name",
+          "text",
+          "number",
+          "number",
+          "number",
+          "number",
+          "number",
+          "number",
+          "number",
+          "number",
+        ],
       ) +
       pagination(data)
     );
@@ -509,19 +547,17 @@ function updateSample() {
   const health = state.error ? "离线" : s?.health.label || "未连接";
   if ($("#widget")) {
     $("#widget").classList.toggle("offline", !!state.error);
-    $(".orb").className = `orb ${tone(health)}`;
     $("#today-total").textContent = compact(s?.today_tokens);
     $("#today-total").title = s ? number(s.today_tokens) + " tokens" : "";
-    $("#health").innerHTML = `<i class="dot"></i>${e(health)}`;
-    $("#delta-input").textContent =
-      s && !state.error && !s.delta.baseline
-        ? compact(s.delta.input_tokens)
-        : "—";
-    $("#delta-output").textContent =
-      s && !state.error && !s.delta.baseline
-        ? compact(s.delta.output_tokens)
-        : "—";
-    $("#interval-label").textContent = state.error
+    $("#health").className = `widget-health ${tone(health)}`;
+    $("#health").setAttribute("aria-label", health);
+    $("#health").title = health;
+    const delta = widgetDelta.update(s, !!state.error);
+    $("#delta-input").textContent = compact(delta.input);
+    $("#delta-output").textContent = compact(delta.output);
+    $("#delta-input").title = number(delta.input);
+    $("#delta-output").title = number(delta.output);
+    const interval = state.error
       ? "等待重新连接"
       : !s
         ? "等待首次采样"
@@ -530,7 +566,7 @@ function updateSample() {
           : `${s.delta.seconds.toFixed(1)}s 内新增`;
     $("#widget").title =
       state.error ||
-      "全局统计 · 北京时间\n悬停查看详情，拖动移动，右键打开菜单";
+      `全局统计 · 北京时间今日 · ${health}\n${interval}${delta.held ? " · 暂留上次用量，连续零用量 16 秒后归零" : ""}\n悬停查看详情，拖动移动，右键打开菜单`;
   }
   if ($("#connection")) {
     $("#connection").className =
@@ -562,7 +598,7 @@ async function openDetail() {
 }
 function settings() {
   const s = state.settings;
-  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper</div><span class="spacer"></span><span class="eyebrow">连接设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body"><div class="settings-intro"><h1>让用量，触手可及。</h1><p>连接已有的 Keeper，桌面上的一小处，<br>就能看见每一次用量变化。</p></div><label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><label class="field">登录密码<input type="password" name="password" placeholder="${s.hasPassword ? "已保存密码，留空继续使用" : "Keeper 登录密码，不是 API Key"}" autocomplete="current-password"></label><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住密码 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row"><input type="checkbox" name="clearPassword">清除已保存密码（适用于无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details><hr class="setting-divider"><div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label>外观</label><div class="segments">${[
+  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper</div><span class="spacer"></span><span class="eyebrow">连接设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body"><label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><label class="field">登录密码<input type="password" name="password" placeholder="${s.hasPassword ? "已保存密码，留空继续使用" : "Keeper 登录密码，不是 API Key"}" autocomplete="current-password"></label><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住密码 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row"><input type="checkbox" name="clearPassword">清除已保存密码（适用于无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details><hr class="setting-divider"><div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label>外观</label><div class="segments">${[
     ["light", "浅色"],
     ["dark", "深色"],
   ]
@@ -576,7 +612,7 @@ function settings() {
 }
 
 root.innerHTML = preview
-  ? `<div class="preview-stage ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / 0.2　·　界面预览，示例数据</div></div>`
+  ? `<div class="preview-stage ${search.has("standalone") ? "standalone" : ""} ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / 0.3　·　界面预览，示例数据</div></div>`
   : windowName === "widget"
     ? widget()
     : windowName === "settings"
@@ -692,7 +728,7 @@ if ($("#widget")) {
   let down = null,
     dragging = false;
   $("#widget").addEventListener("pointerdown", (event) => {
-    if (event.button === 0) {
+    if (event.button === 0 && !event.target.closest("button")) {
       down = { x: event.screenX, y: event.screenY };
       dragging = false;
     }

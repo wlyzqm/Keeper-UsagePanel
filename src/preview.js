@@ -7,19 +7,19 @@ export function createPreview(search) {
     offline = search.get("state") === "offline",
     long = search.get("state") === "long";
   const stats = {
-    total_tokens: empty ? 0 : 8426190,
-    total_requests: empty ? 0 : 1248,
-    success_count: empty ? 0 : 1239,
-    failure_count: empty ? 0 : 9,
+    total_tokens: empty ? 0 : 295139623,
+    total_requests: empty ? 0 : 2493,
+    success_count: empty ? 0 : 2408,
+    failure_count: empty ? 0 : 85,
   };
   const activity = {
-    input_tokens: empty ? 0 : 7182430,
-    output_tokens: empty ? 0 : 1243760,
-    cache_read_tokens: empty ? 0 : 5679308,
-    cache_creation_tokens: empty ? 0 : 148240,
-    reasoning_tokens: empty ? 0 : 628510,
+    input_tokens: empty ? 0 : 293553727,
+    output_tokens: empty ? 0 : 1585896,
+    cache_read_tokens: empty ? 0 : 275625728,
+    cache_creation_tokens: empty ? 0 : 0,
+    reasoning_tokens: empty ? 0 : 592429,
   };
-  const sample = {
+  let sample = {
     sampled_at: new Date().toISOString(),
     today_tokens: stats.total_tokens,
     delta: {
@@ -31,6 +31,11 @@ export function createPreview(search) {
     },
     health: { label: "健康", success: 324, failure: 3 },
   };
+  window.__previewEmitSample = (next) => {
+    sample = next;
+    emit("sample", sample);
+  };
+  window.__previewEmitError = (error) => emit("connection-error", error);
   const account = {
     id: "account-1",
     identity: "auth-index-1",
@@ -68,7 +73,7 @@ export function createPreview(search) {
   const analysis = {
     cost_breakdown: {
       cost_available: true,
-      total_cost_usd: 18.625,
+      total_cost_usd: 42.8965,
       uncached_input_cost_usd: 5.24,
       cache_read_cost_usd: 1.68,
       cache_write_cost_usd: 0.44,
@@ -109,7 +114,7 @@ export function createPreview(search) {
       if (command === "last_sample") return offline ? null : sample;
       if (command === "sample") {
         if (offline) throw "无法连接 Keeper，请检查地址与网络";
-        sample.sampled_at = new Date().toISOString();
+        if (!search.has("manual")) sample.sampled_at = new Date().toISOString();
         emit("sample", sample);
         return sample;
       }
@@ -144,7 +149,7 @@ export function createPreview(search) {
               usage: stats,
               summary: {
                 ...activity,
-                total_cost: empty ? 0 : 18.625,
+                total_cost: empty ? 0 : 42.8965,
                 cost_available: true,
               },
             },
@@ -173,15 +178,17 @@ export function createPreview(search) {
                   subscription: { plan: "Plus" },
                   quota: [
                     {
-                      label: "5 小时",
+                      label: "GPT-5.3-Codex-Spark-5h",
                       remainingFraction: 0.82,
                       resetAt: sample.sampled_at,
                       window_usage_tokens: 1408230,
                       window_usage_cost: 4.38,
                     },
                     {
-                      label: "每周",
-                      remainingFraction: 0.67,
+                      label: "Weekly",
+                      usedPercent: 28,
+                      window_usage_tokens: 564617884,
+                      window_usage_cost: 89.9891,
                       resetAt: sample.sampled_at,
                     },
                   ],

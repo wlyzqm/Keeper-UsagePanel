@@ -14,6 +14,9 @@ test("compact numbers preserve trailing integer zeroes", () => {
   assert.equal(compact(100000), "100K");
   assert.equal(compact(10000), "10K");
   assert.equal(compact(8426190), "8.43M");
+  assert.equal(compact(5646178840000), "5.65T");
+  assert.equal(compact(1234000000000000), "1.23P");
+  assert.equal(compact(1234000000000000000), "1.23E");
   assert.equal(compact(0), "0");
   assert.equal(compact(null), "—");
 });

@@ -11,9 +11,9 @@ pub struct Hover {
 
 pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     for (label, w, h) in [
-        ("widget", 224., 112.),
-        ("detail", 552., 712.),
-        ("settings", 488., 684.),
+        ("widget", 216., 74.),
+        ("detail", 640., 640.),
+        ("settings", 488., 640.),
     ] {
         WebviewWindowBuilder::new(
             app,
@@ -103,7 +103,7 @@ pub fn show_settings(app: &tauri::AppHandle) {
         let area = work_area(&w);
         let _ = w.set_size(LogicalSize::new(
             488_f64.min((area.2 - area.0) as f64 / scale),
-            684_f64.min((area.3 - area.1) as f64 / scale),
+            640_f64.min((area.3 - area.1) as f64 / scale),
         ));
         let _ = w.center();
         let _ = w.show();
@@ -129,15 +129,16 @@ pub fn show_detail(app: &tauri::AppHandle) {
     };
     let scale = widget.scale_factor().unwrap_or(1.);
     let area = work_area(&widget);
-    let width = 552.;
-    let height = 712_f64.min((area.3 - area.1) as f64 / scale);
+    let width = 640_f64.min((area.2 - area.0) as f64 / scale);
+    let height = 640_f64.min((area.3 - area.1) as f64 / scale);
     let pw = (width * scale) as i32;
     let ph = (height * scale) as i32;
-    let right = p.x + size.width as i32 - 4;
-    let left = p.x - pw + 4;
+    let overlap = (4. * scale) as i32;
+    let right = p.x + size.width as i32 - overlap;
+    let left = p.x - pw + overlap;
     let x =
         if right + pw <= area.2 { right } else { left }.clamp(area.0, (area.2 - pw).max(area.0));
-    let y = (p.y - 20).clamp(area.1, (area.3 - ph).max(area.1));
+    let y = (p.y - (8. * scale) as i32).clamp(area.1, (area.3 - ph).max(area.1));
     let _ = panel.set_position(PhysicalPosition::new(x, y));
     let _ = panel.set_size(LogicalSize::new(width, height));
     // Showing a hover panel must not steal keyboard focus from the user's app.
@@ -257,9 +258,9 @@ pub fn track(app: tauri::AppHandle) {
                 && cursor.y >= p.y as f64 + m
                 && cursor.y <= (p.y + s.height as i32) as f64 - m
         };
-        let in_ball = inside(&widget, 10.);
+        let in_ball = inside(&widget, 8.);
         let panel = app.get_webview_window("detail");
-        let in_panel = panel.as_ref().is_some_and(|w| inside(w, 10.));
+        let in_panel = panel.as_ref().is_some_and(|w| inside(w, 8.));
         let bridge = panel.as_ref().is_some_and(|w| {
             if !w.is_visible().unwrap_or(false) {
                 return false;
@@ -272,10 +273,11 @@ pub fn track(app: tauri::AppHandle) {
             ) else {
                 return false;
             };
+            let margin = (12. * widget.scale_factor().unwrap_or(1.)) as i32;
             let (left, right) = if a.x < b.x {
-                (a.x + sa.width as i32 - 14, b.x + 14)
+                (a.x + sa.width as i32 - margin, b.x + margin)
             } else {
-                (b.x + sb.width as i32 - 14, a.x + 14)
+                (b.x + sb.width as i32 - margin, a.x + margin)
             };
             cursor.x >= left as f64
                 && cursor.x <= right as f64
