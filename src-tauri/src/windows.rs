@@ -138,6 +138,16 @@ pub fn visible(w: &tauri::WebviewWindow) -> bool {
     #[cfg(not(windows))]
     w.is_visible().unwrap_or(false)
 }
+fn foreground(w: &tauri::WebviewWindow) -> bool {
+    #[cfg(windows)]
+    unsafe {
+        return w.hwnd().is_ok_and(|hwnd| {
+            windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() == hwnd.0 as _
+        });
+    }
+    #[cfg(not(windows))]
+    w.is_focused().unwrap_or(false)
+}
 pub fn show_inactive(w: &tauri::WebviewWindow) {
     #[cfg(windows)]
     unsafe {
@@ -199,12 +209,6 @@ pub fn show_settings(app: &tauri::AppHandle) {
     }
 }
 pub fn show_detail(app: &tauri::AppHandle) {
-    if app
-        .get_webview_window("settings")
-        .is_some_and(|w| visible(&w))
-    {
-        return;
-    }
     let (Some(widget), Some(panel)) = (
         app.get_webview_window("widget"),
         app.get_webview_window("detail"),
@@ -371,7 +375,7 @@ pub fn track(app: tauri::AppHandle) {
         });
         if app
             .get_webview_window("settings")
-            .is_some_and(|w| visible(&w))
+            .is_some_and(|w| foreground(&w))
         {
             continue;
         }

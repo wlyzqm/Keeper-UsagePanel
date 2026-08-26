@@ -1,4 +1,4 @@
-# Keeper UsagePanel 0.4.0
+# Keeper UsagePanel 0.4.1
 
 面向 Windows 10 / 11 x64 的 Keeper 置顶悬浮球。Tauri 2 + Rust + HTML/CSS，直接连接既有 Keeper，不安装远程适配服务，不启动本地 HTTP 服务。
 
@@ -8,7 +8,7 @@
 
 [Windows Release 下载入口](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。本轮构建及发布状态见 [验证记录](VERIFICATION.md)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件。
 
-推荐运行 `KeeperUsagePanel_0.4.0_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
+推荐运行 `KeeperUsagePanel_0.4.1_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
 
 升级前请先退出旧版。安装包和程序未做代码签名，可使用交付目录中的 `SHA256SUMS.txt` 核对文件。
 
