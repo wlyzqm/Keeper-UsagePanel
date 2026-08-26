@@ -22,6 +22,18 @@ try {
   await page.goto("http://127.0.0.1:1420/?preview=1");
   await page.locator(".metric-value").first().waitFor();
   await page.screenshot({ path: ".cache/screenshots/overview-light.png" });
+  assert.equal(await page.locator(".settings-button").innerText(), "设置");
+  await page.locator('[data-console="usage"]').click();
+  await page.locator('[data-console="cpa"]').click();
+  assert.deepEqual(
+    await page.evaluate(() =>
+      window.__previewCalls
+        .filter((c) => c.command === "open_console")
+        .map((c) => c.args.target),
+    ),
+    ["usage", "cpa"],
+  );
+
   const labelRect = await page.locator(".metric-label").first().boundingBox();
   await page.mouse.move(labelRect.x + 2, labelRect.y + 8);
   await page.mouse.down();
@@ -177,6 +189,12 @@ try {
     ["summary"],
   );
   assert.equal(await page.locator("[data-pick=key]").count(), 0);
+  assert.equal(await page.locator("#cpa-console").isDisabled(), true);
+  assert.ok(
+    (await page.locator("#cpa-console").getAttribute("title")).includes(
+      "管理员",
+    ),
+  );
   await page.locator('[data-pick=range][data-value="30d"]').click();
   await page.locator(".scope-tag").filter({ hasText: "近 30 天" }).waitFor();
   assert.ok(
@@ -201,6 +219,28 @@ try {
     );
     await page.locator(".metric-value").first().waitFor();
     await page.evaluate(() => document.fonts.ready);
+    const header = await page.evaluate(() => {
+      const names = [
+        "#connection",
+        '[data-console="usage"]',
+        '[data-console="cpa"]',
+        ".settings-button",
+      ];
+      const boxes = names.map((selector) =>
+        document.querySelector(selector).getBoundingClientRect(),
+      );
+      const row = document.querySelector(".brand-row");
+      return {
+        fits: row.scrollWidth <= row.clientWidth + 1,
+        ordered: boxes.every((b, i) => i === 0 || b.left >= boxes[i - 1].right),
+        width: boxes[3].width,
+      };
+    });
+    assert.ok(
+      header.fits && header.ordered && header.width >= 54,
+      JSON.stringify(header),
+    );
+
     const metrics = await page.locator(".metric-value").evaluateAll((els) =>
       els.map((el) => ({
         size: getComputedStyle(el).fontSize,

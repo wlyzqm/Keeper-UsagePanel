@@ -219,6 +219,33 @@ async fn get_view(
     result
 }
 #[tauri::command]
+async fn open_console(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    target: String,
+) -> Result<(), String> {
+    if window.label() != "detail" {
+        return Err("请通过面板打开控制台".into());
+    }
+    if target == "usage" {
+        let endpoint = state.settings.lock().unwrap().endpoint.clone();
+        let url = keeper_core::browser_url(&endpoint)?;
+        return windows::open_browser(url.as_str());
+    }
+    if target != "cpa" {
+        return Err("未知控制台".into());
+    }
+    let client = state.client.read().await.clone().ok_or("请先连接 Keeper")?;
+    let url = client.console_url().await?;
+    let current = state.client.read().await;
+    if !current.as_ref().is_some_and(|c| Arc::ptr_eq(c, &client)) {
+        return Err("连接已更新，请重新打开控制台".into());
+    }
+    let url = keeper_core::browser_url(&url)?;
+    // Open the user's browser; never forward the in-app cookie, password or sk.
+    windows::open_browser(url.as_str())
+}
+#[tauri::command]
 fn window_action(
     app: tauri::AppHandle,
     window: WebviewWindow,
@@ -301,6 +328,7 @@ fn main() {
             get_view,
             get_access,
             set_scope,
+            open_console,
             window_action
         ])
         .on_window_event(|window, event| {

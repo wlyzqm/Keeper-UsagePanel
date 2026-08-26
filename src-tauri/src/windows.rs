@@ -392,3 +392,39 @@ pub fn track(app: tauri::AppHandle) {
         }
     });
 }
+
+pub fn open_browser(url: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Com::{
+            CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+        };
+        let initialized = CoInitializeEx(
+            std::ptr::null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as _,
+        );
+        if initialized < 0 {
+            return Err("无法初始化 Windows 浏览器打开组件".into());
+        }
+        let verb: Vec<u16> = "open\0".encode_utf16().collect();
+        let target: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+        let result = windows_sys::Win32::UI::Shell::ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        );
+        CoUninitialize();
+        if result as isize > 32 {
+            return Ok(());
+        }
+        return Err("无法打开默认浏览器，请检查 Windows 默认应用设置".into());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = url;
+        Err("请在 Windows 桌面程序中打开控制台".into())
+    }
+}

@@ -137,7 +137,7 @@ function widget() {
   return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 用量，悬停或点击查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div></div></div>`;
 }
 function panel() {
-  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div>${button("settings", "连接设置")}${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
+  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div><div class="header-actions"><button class="console-button" data-console="usage" title="在默认浏览器打开配置的 Keeper 地址">用量控制台</button><button class="console-button" data-console="cpa" id="cpa-console" disabled title="连接后获取 CPA 地址">CPA 控制台</button><button class="settings-button" data-action="settings">设置</button></div>${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
     .map(
       ([id, label, i]) =>
         `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`,
@@ -658,6 +658,23 @@ root.innerHTML = preview
 document.addEventListener("click", async (event) => {
   const b = event.target.closest("button");
   if (!b) return;
+  if (b.dataset.console) {
+    b.disabled = true;
+    try {
+      await api.call("open_console", { target: b.dataset.console });
+      $("#console-error")?.remove();
+    } catch (error) {
+      $("#console-error")?.remove();
+      $("#content").insertAdjacentHTML(
+        "afterbegin",
+        `<div class="note" id="console-error" role="alert">${e(String(error))}</div>`,
+      );
+    } finally {
+      b.disabled =
+        b.dataset.console === "cpa" && state.access?.role !== "admin";
+    }
+    return;
+  }
   if (b.dataset.action) {
     const name = b.dataset.action;
     if (name === "refresh") {
@@ -876,6 +893,13 @@ function applyAccess(access) {
           `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`,
       )
       .join("");
+  const cpa = $("#cpa-console");
+  if (cpa) {
+    cpa.disabled = access.role !== "admin";
+    cpa.title = cpa.disabled
+      ? "Keeper 仅向管理员提供 CPA 控制台地址"
+      : "从 Keeper 获取地址，在默认浏览器打开 CPA 控制台";
+  }
   renderFilters();
   if (changed && $("#content")) {
     $("#content").innerHTML = "";
@@ -916,6 +940,7 @@ await api.on("configured", async ({ settings: s, revision }) => {
   if (windowName !== "settings") {
     if ($("#content")) $("#content").innerHTML = "";
     if ($(".tabs")) $(".tabs").innerHTML = "";
+    if ($("#cpa-console")) $("#cpa-console").disabled = true;
     try {
       await refreshAccess();
     } catch (error) {

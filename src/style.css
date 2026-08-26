@@ -1111,3 +1111,49 @@ summary::-webkit-details-marker {
   font: inherit;
   font-size: 13px;
 }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.console-button,
+.settings-button {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.console-button {
+  color: var(--ink);
+  background: var(--paper);
+}
+.console-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.console-button:disabled {
+  opacity: 0.5;
+}
+.settings-button {
+  min-width: 54px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--paper);
+}
+.settings-button:hover {
+  filter: brightness(1.12);
+}
+@media (max-width: 600px) {
+  .brand-subtitle {
+    display: none;
+  }
+  .panel:not(.settings) .brand-row {
+    gap: 6px;
+  }
+}

@@ -123,6 +123,47 @@ pub fn validate_endpoint(endpoint: &str, allow_http: bool) -> Result<Url, String
     url.set_path(&format!("{}/", url.path().trim_end_matches('/')));
     Ok(url)
 }
+pub fn browser_url(value: &str) -> Result<Url, String> {
+    let url = Url::parse(value).map_err(|_| "控制台地址无效")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("控制台链接仅支持不含登录凭据的 HTTP / HTTPS 地址".into());
+    }
+    Ok(url)
+}
+// Same public URL and management.html convention as Keeper's UsagePage.
+pub fn cpa_console_url(base: &Url, configured: Option<&str>) -> Result<String, String> {
+    let origin = base.origin().ascii_serialization();
+    let raw = configured.unwrap_or(&origin).trim();
+    if raw.is_empty() {
+        return Err("Keeper 未提供 CPA 控制台地址".into());
+    }
+    let prepared = if raw.starts_with('/') {
+        Url::parse(&origin)
+            .unwrap()
+            .join(raw)
+            .map_err(|_| "CPA 地址无效")?
+            .to_string()
+    } else if raw.contains("://") {
+        raw.to_string()
+    } else {
+        format!("{}://{}", base.scheme(), raw)
+    };
+    let mut url = browser_url(&prepared)?;
+    if !url.path().ends_with("/management.html") {
+        url.set_path(&format!(
+            "{}/management.html",
+            url.path().trim_end_matches('/')
+        ));
+        url.set_query(None);
+        url.set_fragment(None);
+    }
+    Ok(url.to_string())
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMode {
@@ -295,6 +336,13 @@ impl Keeper {
     pub async fn access(&self) -> Result<Value, String> {
         self.login().await?;
         Ok(self.session.lock().await.clone())
+    }
+    pub async fn console_url(&self) -> Result<String, String> {
+        if self.is_viewer() {
+            return Err("Keeper 仅向管理员提供 CPA 控制台地址".into());
+        }
+        let status = self.cached("status", &[], 60).await?;
+        cpa_console_url(&self.base, status["cpa_public_url"].as_str())
     }
     pub async fn logout(&self) -> Result<(), String> {
         self.request("auth/logout", &[], Some(json!({}))).await?;

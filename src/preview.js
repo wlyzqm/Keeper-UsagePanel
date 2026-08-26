@@ -115,6 +115,7 @@ export function createPreview(search) {
     },
     call: async (command, args = {}) => {
       window.__previewCalls.push({ command, args });
+      if (command === "open_console") return;
       if (command === "get_access") return structuredClone(access);
       if (command === "set_scope") {
         if (viewer) throw "sk 登录不能切换 Key owner";

@@ -407,3 +407,52 @@ async fn sk_midnight_bridge_uses_own_activity_totals() {
         requests[5].contains("key-activity?range=custom&unit=day&start=2026-08-26&end=2026-08-26")
     );
 }
+
+#[test]
+fn cpa_console_matches_keeper_public_url_rules_and_rejects_unsafe_links() {
+    let base = validate_endpoint("https://keeper.example/usage", false).unwrap();
+    for (raw, expected) in [
+        (None, "https://keeper.example/management.html"),
+        (
+            Some("https://cpa.example"),
+            "https://cpa.example/management.html",
+        ),
+        (Some("/cpa/"), "https://keeper.example/cpa/management.html"),
+        (
+            Some("cpa.example:8317/"),
+            "https://cpa.example:8317/management.html",
+        ),
+        (
+            Some("https://cpa.example/cpa/management.html"),
+            "https://cpa.example/cpa/management.html",
+        ),
+    ] {
+        assert_eq!(keeper_core::cpa_console_url(&base, raw).unwrap(), expected);
+    }
+    for raw in [
+        "javascript://alert(1)",
+        "file:///secret",
+        "ftp://cpa.example",
+        "https://user:secret@cpa.example",
+        "",
+    ] {
+        assert!(keeper_core::cpa_console_url(&base, Some(raw)).is_err());
+    }
+}
+#[tokio::test]
+async fn cpa_console_uses_admin_status_only_and_sk_never_requests_it() {
+    let (url, requests, task) = server(vec![
+        (204, json!(null)),
+        (200, json!({"cpa_public_url":"https://cpa.example/cpa/"})),
+    ])
+    .await;
+    let admin = Keeper::new(&url, "", false).unwrap();
+    assert_eq!(
+        admin.console_url().await.unwrap(),
+        "https://cpa.example/cpa/management.html"
+    );
+    task.await.unwrap();
+    assert!(requests.lock().await[2].starts_with("GET /usage/api/v1/status "));
+    let viewer = Keeper::connect(&url, "sk-fixture", false, "", AuthMode::ApiKey).unwrap();
+    assert!(viewer.console_url().await.unwrap_err().contains("管理员"));
+}
