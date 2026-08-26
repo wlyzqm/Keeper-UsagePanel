@@ -12,7 +12,21 @@
 
 ## Windows 构建
 
-本轮 Windows CI 待运行。成功后补充源码提交、构建链接与 EXE SHA256。未使用旧版 EXE 充当新版产物。
+- 2026-08-26 19:45（北京），[Windows CI](https://github.com/wlyzqm/Keeper-UsagePanel/actions/runs/32964062713) 构建成功。程序源码提交为 `0711a6c81a623bd617c97fab8750a1526296cbe3`，版本标签 `v0.3.0` 指向此提交。后续提交仅涉及发布流程和交付文档。
+- Windows runner 通过 9 项 JavaScript 检查、13 项 Rust 核心检查及 1 项 Windows DPAPI 往返检查；Tauri 发布编译及 NSIS 打包成功。
+- 下载的 CI ZIP SHA256 与 GitHub artifact digest 一致，ZIP CRC 检查通过。便携程序为 Windows x64 GUI PE。安装器外壳为 NSIS x86，内含的应用为 x64。
+- 本地交付含独立 EXE、安装 EXE、带说明 / 截图 / 字体许可的便携 ZIP，以及 SHA256SUMS.txt；ZIP 中的 EXE 与 CI 原件完全一致。
+
+| 文件 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| KeeperUsagePanel.exe | 10,149,376 | `69a36dcf144b0f020ecd94484275da9eec66e7cc46cb5501aae4734301e84d2b` |
+| KeeperUsagePanel_0.3.0_x64-setup.exe | 2,761,260 | `f3e96271d4d7e00c9d1f7fe0a414a4d1edc33b160e6c5d5d6d88ce01cf9c0463` |
+
+## Release 发布状态
+
+已新增主分支构建成功后自动发布的工作流。发布步骤先上传完整附件，再公开 Release；同版本不覆盖其他源码的产物。
+
+首轮发布在查询不存在标签时收到 GitHub 422，已修复为先判断标签引用是否存在；已创建指向上述构建源码的 v0.3.0 标签。修复后的新标签 / 已有标签分支通过本地模拟检查。当前连接器重跑 Actions 返回 403（无 Actions 写权限），需在 [发布流程](https://github.com/wlyzqm/Keeper-UsagePanel/actions/runs/32964987960) 点击 Re-run failed jobs，或手动运行 Publish Windows release 并填写 build run ID `32964062713`。此时尚未确认公开 Release，不能把本地成品等同于已发布附件。
 
 ## 证据边界
 

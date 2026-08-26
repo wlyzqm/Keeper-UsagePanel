@@ -6,7 +6,7 @@
 
 ## 使用
 
-[下载 Windows 版（GitHub Release）](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件。
+[Windows Release 下载入口](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。0.3.0 已完成 Windows 构建，当前首次 Release 发布等待重新运行发布步骤，状态见 [验证记录](VERIFICATION.md)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件。
 
 推荐运行 `KeeperUsagePanel_0.3.0_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
 
