@@ -6,7 +6,7 @@
 
 ## 使用
 
-[Windows Release 下载入口](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。本轮构建及发布状态见 [验证记录](VERIFICATION.md)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件。
+[Windows Release 下载入口](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。0.4.2 已完成 Windows 编译并公开发布，校验信息见 [验证记录](VERIFICATION.md)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件。
 
 推荐运行 `KeeperUsagePanel_0.4.2_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
 
@@ -37,7 +37,7 @@
 - 用量控制台在 Windows 默认浏览器打开设置中提供的 Keeper 地址。
 - 管理员点击 CPA 控制台时读取 `/api/v1/status.cpa_public_url`，按 Keeper 的规则补上 `management.html`，支持完整地址、子路径与裸域名。Keeper 未设置该字段时，与 Keeper 网页一样使用当前源的 `/management.html`。
 - `status` 是管理员接口；sk 模式保留禁用的 CPA 按钮并解释权限限制，不请求管理接口或猜测另一个 CPA 域名。
-- 只允许 HTTP / HTTPS 链接，不传递应用内的密码、sk 或会话 Cookie；浏览器与桌面应用各自登录。
+- 只允许 HTTP / HTTPS 链接，不传递应用内的密码、sk 或会话 Cookie；浏览器与桌面应用各自登录；外部浏览器使用自己的网络 / 代理配置，不继承本工具代理。
 
 ## 代理与字体
 
