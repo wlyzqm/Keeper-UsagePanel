@@ -180,7 +180,7 @@ svg {
   border-radius: 8px;
   background: var(--paper);
   box-shadow: var(--shadow);
-  cursor: grab;
+  cursor: default;
   font-family: var(
     --widget-font,
     "HarmonyOS Sans SC",
@@ -192,7 +192,7 @@ svg {
 .widget:hover {
   border-color: var(--accent);
 }
-.widget:active {
+.widget.dragging {
   cursor: grabbing;
 }
 .widget .num {
@@ -1084,4 +1084,30 @@ summary::-webkit-details-marker {
   .filters-key .picker-label {
     max-width: 90px;
   }
+}
+
+.viewer-scope {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 210px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+.viewer-scope span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#auth-mode {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
 }

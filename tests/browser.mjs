@@ -38,10 +38,49 @@ try {
   assert.equal(await page.locator("#delta-input").innerText(), "12.5K");
   await page.locator('[data-pick=range][data-value="30d"]').click();
   await page.locator(".scope-tag").filter({ hasText: "近 30 天" }).waitFor();
-  await page.locator('summary[aria-label="按 Key 筛选"]').click();
+  await page.locator('summary[aria-label="选择 Key owner"]').click();
   await page.locator("[data-pick=key][data-value=k1]").click();
   await page.locator(".scope-tag").filter({ hasText: "开发项目" }).waitFor();
-  assert.equal(await page.locator("#today-total").innerText(), "295M");
+  await page.waitForFunction(
+    () => document.querySelector("#today-total").textContent === "1.23M",
+  );
+  assert.equal(await page.locator("[data-tab=accounts]").count(), 0);
+  await page.evaluate(() =>
+    window.__previewEmitSample({
+      revision: 0,
+      sampled_at: "2030-01-01T00:00:00Z",
+      today_tokens: 99999999,
+      health: { label: "健康" },
+      delta: { input_tokens: 99, output_tokens: 99, seconds: 2 },
+    }),
+  );
+  assert.equal(
+    await page.locator("#today-total").innerText(),
+    "1.23M",
+    "Stale responses must not overwrite the current key",
+  );
+  // Restore the preview server's current scope after injecting a late event.
+  await page.evaluate(() =>
+    window.__previewEmitSample({
+      revision: 1,
+      sampled_at: "2030-01-01T00:00:02Z",
+      today_tokens: 1234567,
+      health: { label: "健康" },
+      delta: { input_tokens: 0, output_tokens: 0, seconds: 0, baseline: true },
+    }),
+  );
+
+  // Reopening detail must preserve the shared key scope, not revert the widget to global.
+  await page.locator("#widget").click();
+  await page.locator(".scope-tag").filter({ hasText: "开发项目" }).waitFor();
+  assert.equal(await page.locator("#widget").getAttribute("title"), null);
+  assert.equal(
+    await page.locator("#widget").evaluate((el) => getComputedStyle(el).cursor),
+    "default",
+  );
+  await page.locator('summary[aria-label="选择 Key owner"]').click();
+  await page.locator('[data-pick=key][data-value=""]').click();
+  await page.locator("[data-tab=accounts]").waitFor();
   for (const tab of ["analysis", "latency", "distribution", "accounts"]) {
     await page.locator(`[data-tab=${tab}]`).click();
     await page.locator(".skeleton").first().waitFor({ state: "detached" });
@@ -102,6 +141,19 @@ try {
     "HarmonyOS Sans SC",
   );
   await page.locator("[name=widgetFont]").fill("Microsoft YaHei");
+  await page.locator("[name=authMode]").selectOption("api_key");
+  assert.equal(
+    await page.locator("#credential-label").innerText(),
+    "CPA API Key（sk）",
+  );
+  await page.locator("[name=password]").fill("sk-preview-only");
+  await page.locator("[name=password]").press("Control+a");
+  assert.equal(
+    await page
+      .locator("[name=password]")
+      .evaluate((el) => el.selectionEnd - el.selectionStart),
+    15,
+  );
   await page.locator("#save-settings").click();
   await page.getByText("预览模式：未写入注册表。").waitFor();
   assert.equal(
@@ -112,6 +164,35 @@ try {
     await page.evaluate(() => window.__previewSavedSettings.value.widgetFont),
     "Microsoft YaHei",
   );
+  assert.equal(
+    await page.evaluate(() => window.__previewSavedSettings.value.authMode),
+    "api_key",
+  );
+  await page.goto("http://127.0.0.1:1420/?preview=1&role=sk&theme=dark");
+  await page.locator(".metric-value").first().waitFor();
+  assert.deepEqual(
+    await page
+      .locator("[data-tab]")
+      .evaluateAll((els) => els.map((el) => el.dataset.tab)),
+    ["summary"],
+  );
+  assert.equal(await page.locator("[data-pick=key]").count(), 0);
+  await page.locator('[data-pick=range][data-value="30d"]').click();
+  await page.locator(".scope-tag").filter({ hasText: "近 30 天" }).waitFor();
+  assert.ok(
+    await page
+      .locator(".scope-tag")
+      .innerText()
+      .then((t) => t.includes("我的项目")),
+  );
+  assert.ok(
+    await page.evaluate(() =>
+      window.__previewCalls
+        .filter((c) => c.command === "get_view")
+        .every((c) => c.args.view === "summary"),
+    ),
+  );
+  await page.screenshot({ path: ".cache/screenshots/sk-overview.png" });
   // Actual native detail size: equal KPI typography and readable contrast in both themes.
   await page.setViewportSize({ width: 640, height: 640 });
   for (const theme of ["light", "dark"]) {
@@ -310,7 +391,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, five tabs, four account views, key/date filters, global widget, themes, empty/offline/long states settings, native-size layout, contrast, numeric overflow, DPI rendering and 16-second display hold.",
+    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings, native-size layout, contrast, numeric overflow, DPI rendering and 16-second display hold.",
   );
 } finally {
   await browser?.close();

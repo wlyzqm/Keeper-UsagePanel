@@ -1,6 +1,14 @@
 // Development only. Vite removes this import from the production bundle.
 export function createPreview(search) {
   const listeners = new Map();
+  const viewer = search.get("role") === "sk";
+  let access = {
+    role: viewer ? "api_key_viewer" : "admin",
+    api_key: { alias: "我的项目", display_key: "sk-***123456" },
+    scope: { api_key_id: "", label: "全部 Key", revision: 0 },
+  };
+  window.__previewCalls = [];
+  window.__previewEvent = (name, value) => emit(name, value);
   const emit = (name, value) =>
     (listeners.get(name) || []).forEach((fn) => fn(value));
   const empty = search.get("state") === "empty",
@@ -29,7 +37,12 @@ export function createPreview(search) {
       baseline: false,
       reset: false,
     },
-    health: { label: "健康", success: 324, failure: 3 },
+    health: {
+      label: "健康",
+      success: 324,
+      failure: 3,
+      basis: viewer ? "key_requests" : "credentials",
+    },
   };
   window.__previewEmitSample = (next) => {
     sample = next;
@@ -101,9 +114,35 @@ export function createPreview(search) {
       return () => {};
     },
     call: async (command, args = {}) => {
+      window.__previewCalls.push({ command, args });
+      if (command === "get_access") return structuredClone(access);
+      if (command === "set_scope") {
+        if (viewer) throw "sk 登录不能切换 Key owner";
+        access.scope = {
+          api_key_id: args.apiKeyId,
+          label: args.apiKeyId ? "开发项目" : "全部 Key",
+          revision: access.scope.revision + 1,
+        };
+        sample = {
+          ...sample,
+          revision: access.scope.revision,
+          sampled_at: new Date().toISOString(),
+          today_tokens: args.apiKeyId ? 1234567 : stats.total_tokens,
+          delta: {
+            input_tokens: 0,
+            output_tokens: 0,
+            seconds: 0,
+            baseline: true,
+            reset: false,
+          },
+        };
+        emit("scope-changed", structuredClone(access));
+        return structuredClone(access);
+      }
       if (command === "get_settings")
         return {
           endpoint: "https://keeper.example/usage",
+          authMode: viewer ? "api_key" : "admin",
           pollSeconds: 2,
           theme: search.get("theme") || "light",
           rememberPassword: true,
@@ -124,9 +163,15 @@ export function createPreview(search) {
       }
       if (command === "window_action") {
         if (args.action === "detail") emit("detail-open");
+        if (args.action === "close-detail") emit("detail-close");
+        if (args.action === "drag") {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          emit("drag-finished");
+        }
         return;
       }
       if (command !== "get_view") throw new Error("Unknown preview command");
+      if (viewer && args.view !== "summary") throw "sk 登录无权访问此指标";
       await new Promise((resolve) => setTimeout(resolve, 80));
       if (offline) throw "连接超时，请检查 Keeper 地址后重试";
       const q = args.query || {};
@@ -146,7 +191,9 @@ export function createPreview(search) {
         case "summary":
           return {
             overview: {
-              usage: stats,
+              usage: access.scope.api_key_id
+                ? { ...stats, total_tokens: 1234567 }
+                : stats,
               summary: {
                 ...activity,
                 total_cost: empty ? 0 : 42.8965,

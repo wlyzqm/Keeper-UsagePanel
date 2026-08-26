@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub endpoint: String,
+    pub auth_mode: keeper_core::AuthMode,
     #[serde(skip_serializing)]
     pub password: String,
     pub has_password: bool,
@@ -21,6 +22,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             endpoint: String::new(),
+            auth_mode: keeper_core::AuthMode::Admin,
             password: String::new(),
             has_password: false,
             remember_password: true,
@@ -102,6 +104,11 @@ mod platform {
             return s;
         };
         s.endpoint = k.get_value("Endpoint").unwrap_or_default();
+        s.auth_mode = if k.get_value::<String, _>("AuthMode").unwrap_or_default() == "api_key" {
+            keeper_core::AuthMode::ApiKey
+        } else {
+            keeper_core::AuthMode::Admin
+        };
         s.poll_seconds = k
             .get_value::<u32, _>("PollSeconds")
             .unwrap_or(2)
@@ -146,6 +153,14 @@ mod platform {
         let write = || -> std::io::Result<()> {
             let (k, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(PATH)?;
             k.set_value("Endpoint", &s.endpoint)?;
+            k.set_value(
+                "AuthMode",
+                &if s.auth_mode == keeper_core::AuthMode::ApiKey {
+                    "api_key"
+                } else {
+                    "admin"
+                },
+            )?;
             k.set_value("PollSeconds", &s.poll_seconds)?;
             k.set_value("Theme", &s.theme)?;
             k.set_value("WidgetFont", &s.widget_font)?;

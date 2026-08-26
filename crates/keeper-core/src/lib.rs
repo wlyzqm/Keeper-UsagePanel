@@ -123,15 +123,29 @@ pub fn validate_endpoint(endpoint: &str, allow_http: bool) -> Result<Url, String
     url.set_path(&format!("{}/", url.path().trim_end_matches('/')));
     Ok(url)
 }
+#[derive(Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMode {
+    #[default]
+    Admin,
+    ApiKey,
+}
+
 pub struct Keeper {
     http: Client,
     base: Url,
     password: String,
+    auth_mode: AuthMode,
+    session: Mutex<Value>,
+    login_error: Mutex<Option<String>>,
+    login_retry: Mutex<Option<Instant>>,
+    activity_gate: Mutex<Option<Instant>>,
+    overview_gate: Mutex<Option<Instant>>,
     authenticated: AtomicBool,
     login_gate: Mutex<()>,
     cache: Mutex<HashMap<String, (Instant, Value)>>,
     identities: Mutex<HashMap<String, Value>>,
-    counter: Mutex<Counter>,
+    counter: Mutex<(u64, String, Counter)>,
 }
 impl Keeper {
     pub fn new(endpoint: &str, password: &str, allow_http: bool) -> Result<Self, String> {
@@ -143,6 +157,18 @@ impl Keeper {
         allow_http: bool,
         proxy_url: &str,
     ) -> Result<Self, String> {
+        Self::connect(endpoint, password, allow_http, proxy_url, AuthMode::Admin)
+    }
+    pub fn connect(
+        endpoint: &str,
+        password: &str,
+        allow_http: bool,
+        proxy_url: &str,
+        auth_mode: AuthMode,
+    ) -> Result<Self, String> {
+        if auth_mode == AuthMode::ApiKey && password.trim().is_empty() {
+            return Err("请输入 CPA API Key（sk）".into());
+        }
         let base = validate_endpoint(endpoint, allow_http)?;
         let mut builder = Client::builder()
             .no_proxy()
@@ -170,11 +196,17 @@ impl Keeper {
             http,
             base,
             password: password.into(),
+            auth_mode,
+            session: Mutex::new(Value::Null),
+            login_error: Mutex::new(None),
+            login_retry: Mutex::new(None),
+            activity_gate: Mutex::new(None),
+            overview_gate: Mutex::new(None),
             authenticated: AtomicBool::new(false),
             login_gate: Mutex::new(()),
             cache: Mutex::new(HashMap::new()),
             identities: Mutex::new(HashMap::new()),
-            counter: Mutex::new(Counter::default()),
+            counter: Mutex::new((0, String::new(), Counter::default())),
         })
     }
     fn url(&self, path: &str, params: &[(String, String)]) -> Result<Url, String> {
@@ -192,22 +224,77 @@ impl Keeper {
         if self.authenticated.load(Ordering::SeqCst) {
             return Ok(());
         }
+        if let Some(error) = &*self.login_error.lock().await {
+            return Err(error.clone());
+        }
+        if self
+            .login_retry
+            .lock()
+            .await
+            .is_some_and(|deadline| Instant::now() < deadline)
+        {
+            return Err("Keeper 登录限流，等待一分钟后重试".into());
+        }
+        let (path, body) = if self.is_viewer() {
+            ("auth/api-key-login", json!({"apiKey":self.password}))
+        } else {
+            ("auth/login", json!({"password":self.password}))
+        };
         let response = self
             .http
-            .post(self.url("auth/login", &[])?)
+            .post(self.url(path, &[])?)
             .header("X-CPA-Usage-Keeper-Request", "fetch")
-            .json(&json!({"password":self.password}))
+            .json(&body)
             .send()
             .await
             .map_err(|_| "无法连接 Keeper，请检查地址与网络")?;
         match response.status().as_u16() {
-            200 | 204 => {
-                self.authenticated.store(true, Ordering::SeqCst);
-                Ok(())
+            200 | 204 => {}
+            401 | 403 => {
+                let error = "登录凭据无效或 Key 已停用，请在连接设置中重新填写".to_string();
+                *self.login_error.lock().await = Some(error.clone());
+                return Err(error);
             }
-            401 | 403 => Err("Keeper 登录密码无效".into()),
-            _ => Err("Keeper 登录失败，请检查地址是否包含 /usage".into()),
+            429 => {
+                *self.login_retry.lock().await =
+                    Some(Instant::now() + std::time::Duration::from_secs(60));
+                return Err("Keeper 登录过于频繁，请一分钟后重新连接".into());
+            }
+            _ => return Err("Keeper 登录失败，请检查地址是否包含 /usage".into()),
         }
+        let response = self
+            .http
+            .get(self.url("auth/session", &[])?)
+            .send()
+            .await
+            .map_err(|_| "无法确认 Keeper 登录权限")?;
+        if !response.status().is_success() {
+            return Err("无法确认 Keeper 登录权限".into());
+        }
+        let session: Value = response.json().await.map_err(|_| "Keeper 会话信息无效")?;
+        let expected = if self.is_viewer() {
+            "api_key_viewer"
+        } else {
+            "admin"
+        };
+        if session["authenticated"] != true || s(&session, "role") != expected {
+            let error = "Keeper 返回的角色与登录方式不符；sk 登录需要开启 Keeper 认证".to_string();
+            *self.login_error.lock().await = Some(error.clone());
+            return Err(error);
+        }
+        *self.session.lock().await = json!({"role":expected,"api_key":{
+            "alias":s(&session["api_key"],"alias"),
+            "display_key":s(&session["api_key"],"display_key")
+        }});
+        self.authenticated.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+    pub fn is_viewer(&self) -> bool {
+        self.auth_mode == AuthMode::ApiKey
+    }
+    pub async fn access(&self) -> Result<Value, String> {
+        self.login().await?;
+        Ok(self.session.lock().await.clone())
     }
     pub async fn logout(&self) -> Result<(), String> {
         self.request("auth/logout", &[], Some(json!({}))).await?;
@@ -220,8 +307,30 @@ impl Keeper {
         params: &[(String, String)],
         body: Option<Value>,
     ) -> Result<Value, String> {
+        // Enforce the role in Rust as well as the UI, including direct IPC calls.
+        if self.is_viewer() && !matches!(path, "key-overview" | "key-activity" | "auth/logout") {
+            return Err("sk 登录无权访问此指标".into());
+        }
+        // Keeper limits each viewer overview/activity route to one request per second,
+        // shared by widget polling, scoped health and the detail window.
+        let mut rate_guard = if self.is_viewer() && path == "key-activity" {
+            Some(self.activity_gate.lock().await)
+        } else if self.is_viewer() && path == "key-overview" {
+            Some(self.overview_gate.lock().await)
+        } else {
+            None
+        };
         for attempt in 0..2 {
             self.login().await?;
+            if let Some(guard) = rate_guard.as_mut() {
+                if let Some(last) = **guard {
+                    let delay =
+                        std::time::Duration::from_millis(1100).saturating_sub(last.elapsed());
+                    tokio::time::sleep(delay).await;
+                }
+                // Record before send as well so cancellation still leaves a rate-limit baseline.
+                **guard = Some(Instant::now());
+            }
             let url = self.url(path, params)?;
             let request = if let Some(ref b) = body {
                 self.http
@@ -235,6 +344,9 @@ impl Keeper {
                 .send()
                 .await
                 .map_err(|_| "连接超时或网络不可达，请检查 Keeper 地址")?;
+            if let Some(guard) = rate_guard.as_mut() {
+                **guard = Some(Instant::now());
+            }
             if response.status().as_u16() == 401 {
                 self.authenticated.store(false, Ordering::SeqCst);
                 if attempt == 0 {
@@ -246,6 +358,8 @@ impl Keeper {
                 return Err(match response.status().as_u16() {
                     404 => "接口不存在，请检查 /usage 路径与 Keeper 版本",
                     400 => "Keeper 不支持此日期范围或账户类型",
+                    403 => "当前登录身份无权访问此指标，请重新连接",
+                    429 => "Keeper 请求限流，请稍后重试",
                     _ => "Keeper 暂不可用，请稍后重试",
                 }
                 .into());
@@ -281,10 +395,27 @@ impl Keeper {
         Ok(value)
     }
     pub async fn sample(&self) -> Result<Value, String> {
-        let mut counter = self.counter.lock().await;
-        let today = self
-            .request("usage/activity", &[("window".into(), "today".into())], None)
-            .await?;
+        self.sample_scoped("", 0).await
+    }
+    pub async fn sample_scoped(&self, api_key_id: &str, revision: u64) -> Result<Value, String> {
+        if self.is_viewer() && !api_key_id.is_empty() {
+            return Err("sk 登录只能查看自身用量".into());
+        }
+        let mut scoped = self.counter.lock().await;
+        if scoped.0 != revision || scoped.1 != api_key_id {
+            *scoped = (revision, api_key_id.into(), Counter::default());
+        }
+        let counter = &mut scoped.2;
+        let activity_path = if self.is_viewer() {
+            "key-activity"
+        } else {
+            "usage/activity"
+        };
+        let mut params = vec![("window".into(), "today".into())];
+        if !api_key_id.is_empty() {
+            params.push(("api_key_id".into(), api_key_id.into()));
+        }
+        let today = self.request(activity_path, &params, None).await?;
         if s(&today, "timezone") != "Asia/Shanghai" {
             return Err("Keeper 时区需设为 Asia/Shanghai，才能按北京时间统计今日用量".into());
         }
@@ -310,17 +441,35 @@ impl Keeper {
             if date > previous.day && (date - previous.day).num_days() <= 364 {
                 let q = Query {
                     range: "custom".into(),
+                    api_key_id: api_key_id.into(),
                     start: previous.day.to_string(),
                     end: date.checked_sub_days(Days::new(1)).unwrap().to_string(),
                     ..Default::default()
                 };
-                closed = Some(totals(
-                    &self.request("usage/analysis", &q.params(at)?, None).await?,
-                ));
+                closed = Some(if self.is_viewer() {
+                    let data = self.request("key-activity", &q.params(at)?, None).await?;
+                    Totals {
+                        input_tokens: n(&data, "input_tokens"),
+                        output_tokens: n(&data, "output_tokens"),
+                        ..Default::default()
+                    }
+                } else {
+                    totals(&self.request("usage/analysis", &q.params(at)?, None).await?)
+                });
             }
         }
         let (mut success, mut failure, mut page, mut pages) = (0, 0, 1, 1);
-        while page <= pages {
+        let scoped_health = self.is_viewer() || !api_key_id.is_empty();
+        if scoped_health {
+            let mut p = vec![("range".into(), "5h".into())];
+            if !api_key_id.is_empty() {
+                p.push(("api_key_id".into(), api_key_id.into()));
+            }
+            let data = self.cached(activity_path, &p, 15).await?;
+            success = n(&data, "total_success");
+            failure = n(&data, "total_failure");
+        }
+        while !scoped_health && page <= pages {
             let data = self
                 .cached(
                     "usage/identities/page",
@@ -341,12 +490,30 @@ impl Keeper {
         }
         let delta = counter.accept(reading, closed);
         Ok(
-            json!({"sampled_at":at,"timezone":"Asia/Shanghai","today_tokens":n(&today,"total_tokens"),"delta":delta,"health":{"label":health(success,failure),"success":success,"failure":failure}}),
+            json!({"sampled_at":at,"timezone":"Asia/Shanghai","today_tokens":n(&today,"total_tokens"),"delta":delta,"health":{"label":health(success,failure),"success":success,"failure":failure,"basis":if scoped_health {"key_requests"} else {"credentials"}}}),
         )
     }
     pub async fn view(&self, view: &str, q: Query) -> Result<Value, String> {
         let now = Utc::now();
         let params = q.params(now)?;
+        if !q.api_key_id.is_empty()
+            && matches!(view, "accounts" | "quota" | "quota-history" | "errors")
+        {
+            return Err("认证账户指标不支持按 Key owner 归属；请切回全部 Key".into());
+        }
+        if self.is_viewer() {
+            if view != "summary" || !q.api_key_id.is_empty() {
+                return Err("sk 登录只开放自身用量总览，不开放管理指标".into());
+            }
+            let overview = self.cached("key-overview", &params, 8).await?;
+            let activity_params = if q.range.is_empty() || q.range == "today" {
+                vec![("window".into(), "today".into())]
+            } else {
+                params
+            };
+            let activity = self.cached("key-activity", &activity_params, 8).await?;
+            return Ok(json!({"overview":overview,"activity":activity}));
+        }
         match view {
             "keys" => return self.cached("usage/api-keys/options", &[], 60).await,
             "summary" => {
@@ -381,6 +548,9 @@ impl Keeper {
                 return Ok(data);
             }
             _ => {}
+        }
+        if !q.api_key_id.is_empty() && matches!(view, "quota" | "quota-history" | "errors") {
+            return Err("此指标属于认证账户，不支持 Key owner 筛选；请切回全部 Key".into());
         }
         let identity = self
             .identities

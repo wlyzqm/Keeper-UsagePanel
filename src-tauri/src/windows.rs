@@ -9,6 +9,60 @@ pub struct Hover {
     left: Option<Instant>,
 }
 
+impl Hover {
+    fn update(&mut self, inside: bool, now: Instant) -> (bool, bool) {
+        if inside {
+            self.left = None;
+            (
+                !self.suppressed
+                    && now.duration_since(*self.entered.get_or_insert(now))
+                        >= Duration::from_millis(180),
+                false,
+            )
+        } else {
+            self.entered = None;
+            self.suppressed = false;
+            (
+                false,
+                now.duration_since(*self.left.get_or_insert(now)) >= Duration::from_millis(320),
+            )
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn hover_recovers_after_suppression_and_long_idle() {
+        let mut hover = Hover::default();
+        let now = Instant::now();
+        assert_eq!(hover.update(true, now), (false, false));
+        assert_eq!(
+            hover.update(true, now + Duration::from_millis(180)),
+            (true, false)
+        );
+        hover.suppressed = true;
+        assert_eq!(
+            hover.update(true, now + Duration::from_secs(1)),
+            (false, false)
+        );
+        assert_eq!(
+            hover.update(false, now + Duration::from_secs(2)),
+            (false, false)
+        );
+        assert_eq!(
+            hover.update(false, now + Duration::from_secs(3)),
+            (false, true)
+        );
+        let later = now + Duration::from_secs(86400);
+        assert_eq!(hover.update(true, later), (false, false));
+        assert_eq!(
+            hover.update(true, later + Duration::from_millis(180)),
+            (true, false)
+        );
+    }
+}
+
 pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     for (label, w, h) in [
         ("widget", 216., 74.),
@@ -25,8 +79,8 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         .decorations(false)
         .transparent(true)
         .shadow(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
+        .always_on_top(label != "settings")
+        .skip_taskbar(label != "settings")
         .resizable(false)
         .visible(label == "widget")
         .focused(false)
@@ -61,7 +115,7 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, e| match e.id.as_ref() {
             "show" => {
                 if let Some(w) = app.get_webview_window("widget") {
-                    let _ = w.show();
+                    show_inactive(&w);
                 }
             }
             "settings" => show_settings(app),
@@ -72,20 +126,48 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         .build(app)?;
     Ok(())
 }
+// Tauri/Tao visibility flags are not updated by native SW_SHOWNOACTIVATE.
+// Use the actual HWND state for both show/hide and pointer tracking.
+pub fn visible(w: &tauri::WebviewWindow) -> bool {
+    #[cfg(windows)]
+    unsafe {
+        return w.hwnd().is_ok_and(|hwnd| {
+            windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd.0 as _) != 0
+        });
+    }
+    #[cfg(not(windows))]
+    w.is_visible().unwrap_or(false)
+}
+pub fn show_inactive(w: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    unsafe {
+        if let Ok(hwnd) = w.hwnd() {
+            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
+                hwnd.0 as _,
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = w.show();
+}
+fn hide_native(w: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    unsafe {
+        if let Ok(hwnd) = w.hwnd() {
+            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
+                hwnd.0 as _,
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = w.hide();
+}
 pub fn hide_detail(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("detail") {
-        if w.is_visible().unwrap_or(false) {
-            #[cfg(windows)]
-            unsafe {
-                if let Ok(hwnd) = w.hwnd() {
-                    windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
-                        hwnd.0 as _,
-                        windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE,
-                    );
-                }
-            }
-            #[cfg(not(windows))]
-            let _ = w.hide();
+        if visible(&w) {
+            hide_native(&w);
             let _ = w.emit("detail-close", ());
         }
     }
@@ -93,12 +175,17 @@ pub fn hide_detail(app: &tauri::AppHandle) {
 pub fn hide(app: &tauri::AppHandle) {
     hide_detail(app);
     if let Some(w) = app.get_webview_window("widget") {
-        let _ = w.hide();
+        hide_native(&w);
     }
 }
 pub fn show_settings(app: &tauri::AppHandle) {
     hide_detail(app);
     if let Some(w) = app.get_webview_window("settings") {
+        if visible(&w) {
+            // Explicit user action may focus it, but must not reset an in-progress password entry.
+            let _ = w.set_focus();
+            return;
+        }
         let scale = w.scale_factor().unwrap_or(1.);
         let area = work_area(&w);
         let _ = w.set_size(LogicalSize::new(
@@ -112,13 +199,19 @@ pub fn show_settings(app: &tauri::AppHandle) {
     }
 }
 pub fn show_detail(app: &tauri::AppHandle) {
+    if app
+        .get_webview_window("settings")
+        .is_some_and(|w| visible(&w))
+    {
+        return;
+    }
     let (Some(widget), Some(panel)) = (
         app.get_webview_window("widget"),
         app.get_webview_window("detail"),
     ) else {
         return;
     };
-    if panel.is_visible().unwrap_or(false) {
+    if visible(&panel) {
         return;
     }
     let Ok(p) = widget.outer_position() else {
@@ -141,18 +234,8 @@ pub fn show_detail(app: &tauri::AppHandle) {
     let y = (p.y - (8. * scale) as i32).clamp(area.1, (area.3 - ph).max(area.1));
     let _ = panel.set_position(PhysicalPosition::new(x, y));
     let _ = panel.set_size(LogicalSize::new(width, height));
-    // Showing a hover panel must not steal keyboard focus from the user's app.
-    #[cfg(windows)]
-    unsafe {
-        if let Ok(hwnd) = panel.hwnd() {
-            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
-                hwnd.0 as _,
-                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
-            );
-        }
-    }
-    #[cfg(not(windows))]
-    let _ = panel.show();
+    app.state::<AppState>().hover.lock().unwrap().left = None;
+    show_inactive(&panel);
     let _ = panel.emit("detail-open", ());
 }
 fn work_area(window: &tauri::WebviewWindow) -> (i32, i32, i32, i32) {
@@ -203,7 +286,7 @@ pub fn track(app: tauri::AppHandle) {
         let Some(widget) = app.get_webview_window("widget") else {
             break;
         };
-        if !widget.is_visible().unwrap_or(false) {
+        if !visible(&widget) {
             continue;
         }
         let state = app.state::<AppState>();
@@ -224,7 +307,9 @@ pub fn track(app: tauri::AppHandle) {
                 let mut hover = state.hover.lock().unwrap();
                 hover.dragging = false;
                 hover.suppressed = true;
+                hover.entered = None;
             }
+            let _ = widget.emit("drag-finished", ());
             if let (Ok(p), Ok(size)) = (widget.outer_position(), widget.outer_size()) {
                 let area = work_area(&widget);
                 let scale = widget.scale_factor().unwrap_or(1.);
@@ -246,7 +331,7 @@ pub fn track(app: tauri::AppHandle) {
             }
         }
         let inside = |w: &tauri::WebviewWindow, margin: f64| -> bool {
-            if !w.is_visible().unwrap_or(false) {
+            if !visible(&w) {
                 return false;
             }
             let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) else {
@@ -262,7 +347,7 @@ pub fn track(app: tauri::AppHandle) {
         let panel = app.get_webview_window("detail");
         let in_panel = panel.as_ref().is_some_and(|w| inside(w, 8.));
         let bridge = panel.as_ref().is_some_and(|w| {
-            if !w.is_visible().unwrap_or(false) {
+            if !visible(&w) {
                 return false;
             }
             let (Ok(a), Ok(b), Ok(sa), Ok(sb)) = (
@@ -286,29 +371,16 @@ pub fn track(app: tauri::AppHandle) {
         });
         if app
             .get_webview_window("settings")
-            .is_some_and(|w| w.is_visible().unwrap_or(false))
+            .is_some_and(|w| visible(&w))
         {
             continue;
         }
         // Do not hold the hover mutex across calls dispatched to the UI thread.
-        let (show, hide) = {
-            let mut hover = state.hover.lock().unwrap();
-            if in_ball || in_panel || bridge {
-                hover.left = None;
-                let show = !hover.suppressed
-                    && hover.entered.get_or_insert_with(Instant::now).elapsed()
-                        >= Duration::from_millis(180);
-                (show, false)
-            } else {
-                hover.entered = None;
-                hover.suppressed = false;
-                (
-                    false,
-                    hover.left.get_or_insert_with(Instant::now).elapsed()
-                        >= Duration::from_millis(320),
-                )
-            }
-        };
+        let (show, hide) = state
+            .hover
+            .lock()
+            .unwrap()
+            .update(in_ball || in_panel || bridge, Instant::now());
         if show {
             show_detail(&app);
         } else if hide {

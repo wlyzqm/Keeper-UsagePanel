@@ -70,7 +70,7 @@ jobs:
           便携版：解压后运行 KeeperUsagePanel.exe，需要 Microsoft WebView2。
           安装版：运行同版本 setup.exe；缺少 WebView2 时联网安装。
           无需 Rust、Cargo 或 .NET。升级前退出旧版，现有配置保留在当前用户注册表。
-          首次启动填写 Keeper 地址和登录密码；设置支持 HTTP/SOCKS5 代理及字体。
+          首次启动填写 Keeper 地址，选择管理员密码或 API Key（sk）登录；设置支持 HTTP/SOCKS5 代理及字体。
           两路增量同时为 0 时暂留上一组结果，连续零用量达到 16 秒后归零。
           程序未签名。原生窗口及真实 Keeper 连接请按 WINDOWS-ACCEPTANCE.md 验收。
 
@@ -130,6 +130,7 @@ jobs:
             const body = [
               `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
               '',
+              '- 新增 sk 受限登录、管理员 Key owner 同步悬浮块、悬停和点击双入口；修复可见状态与设置窗置顶问题。',
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
               '- win-x64.zip：便携版、说明与验收清单；需已有 WebView2。',
               '- KeeperUsagePanel.exe：独立便携程序。',

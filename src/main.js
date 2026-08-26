@@ -29,6 +29,9 @@ const widgetDelta = new WidgetDeltaDisplay();
 const state = {
   settings: { pollSeconds: 2, theme: "light" },
   sample: null,
+  access: null,
+  revision: 0,
+  epoch: 0,
   error: "",
   tab: "summary",
   range: "today",
@@ -56,6 +59,20 @@ const tabs = [
   ["distribution", "分布", "distribution"],
   ["accounts", "账户", "accounts"],
 ];
+const availableTabs = () =>
+  !state.access
+    ? []
+    : state.access.role === "api_key_viewer"
+      ? tabs.filter(([id]) => id === "summary")
+      : tabs.filter(([id]) => id !== "accounts" || !state.key);
+const scopeLabel = () =>
+  state.access?.role === "api_key_viewer"
+    ? state.access.api_key?.alias ||
+      state.access.api_key?.display_key ||
+      "当前 sk"
+    : state.access?.scope?.label || "全部 Key";
+const viewCall = (view, query = {}) =>
+  api.call("get_view", { view, query, revision: state.revision });
 const ranges = {
   today: "今日",
   yesterday: "昨日",
@@ -82,8 +99,10 @@ const applyAppearance = () => {
 const action = async (name) => {
   try {
     await api.call("window_action", { action: name });
+    return true;
   } catch (error) {
     console.error(error);
+    return false;
   }
 };
 const button = (name, title) =>
@@ -112,15 +131,23 @@ const table = (headers, items, kinds = []) =>
         .join("")}</tbody></table></div>`
     : `<div class="rows-card empty-inline">此范围暂无记录</div>`;
 const picker = (name, label, options, selected, extra = "") =>
-  `<details class="picker ${extra}"><summary aria-label="${name === "key" ? "按 Key 筛选" : name === "range" ? "更多日期范围" : name === "account" ? "选择认证账户" : "切换分布维度"}">${name === "key" ? icon("key") : ""}<span class="picker-label">${e(label)}</span>${icon("chevron")}</summary><div class="picker-menu">${options.map(([value, text]) => `<button data-pick="${name}" data-value="${e(value)}" class="${String(value) === String(selected) ? "selected" : ""}" title="${e(text)}">${e(text)}</button>`).join("")}</div></details>`;
+  `<details class="picker ${extra}"><summary aria-label="${name === "key" ? "选择 Key owner" : name === "range" ? "更多日期范围" : name === "account" ? "选择认证账户" : "切换分布维度"}">${name === "key" ? icon("key") : ""}<span class="picker-label">${e(label)}</span>${icon("chevron")}</summary><div class="picker-menu">${options.map(([value, text]) => `<button data-pick="${name}" data-value="${e(value)}" class="${String(value) === String(selected) ? "selected" : ""}" title="${e(text)}">${e(text)}</button>`).join("")}</div></details>`;
 
 function widget() {
-  return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 全局用量，悬停查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div></div></div>`;
+  return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 用量，悬停或点击查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div></div></div>`;
 }
 function panel() {
-  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div>${button("settings", "连接设置")}${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${tabs.map(([id, label, i]) => `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`).join("")}</nav></header><div id="connection-banner" hidden></div><section class="panel-content" id="content" aria-live="polite"></section><footer class="panel-footer"><span class="footer-lock">${icon("shield")}只读 · 北京时间</span><button data-action="refresh" id="updated-at">${icon("refresh")}等待采样</button></footer></main></div>`;
+  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div>${button("settings", "连接设置")}${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
+    .map(
+      ([id, label, i]) =>
+        `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`,
+    )
+    .join(
+      "",
+    )}</nav></header><div id="connection-banner" hidden></div><section class="panel-content" id="content" aria-live="polite"></section><footer class="panel-footer"><span class="footer-lock">${icon("shield")}只读 · 北京时间</span><button data-action="refresh" id="updated-at">${icon("refresh")}等待采样</button></footer></main></div>`;
 }
 function renderFilters() {
+  if (!$("#filters")) return;
   const more = !["today", "7d", "30d"].includes(state.range);
   $("#filters").innerHTML =
     `<div class="filter-row"><div class="segments">${["today", "7d", "30d"].map((r) => `<button class="${r === state.range ? "active" : ""}" data-pick="range" data-value="${r}">${ranges[r]}</button>`).join("")}</div>${picker(
@@ -132,10 +159,10 @@ function renderFilters() {
         ["custom", "自定义"],
       ],
       state.range,
-    )}${picker("key", state.keys.find((k) => String(k.id) === state.key)?.label || "全部 Key", [["", "全部 Key"], ...state.keys.map((k) => [k.id, k.label])], state.key, "filters-key")}</div>${state.range === "custom" ? `<div class="custom-range"><input aria-label="开始日期" id="range-start" type="date" value="${e(state.start)}"><span class="muted">至</span><input aria-label="结束日期" id="range-end" type="date" value="${e(state.end)}"><button class="small-button" data-action="apply-range">应用</button></div>` : ""}`;
+    )}${state.access?.role === "admin" ? picker("key", scopeLabel(), [["", "全部 Key"], ...state.keys.map((k) => [k.id, k.label])], state.key, "filters-key") : `<span class="viewer-scope" title="${e(scopeLabel())}">${icon("key")}<span>${e(scopeLabel())}</span></span>`}</div>${state.range === "custom" ? `<div class="custom-range"><input aria-label="开始日期" id="range-start" type="date" value="${e(state.start)}"><span class="muted">至</span><input aria-label="结束日期" id="range-end" type="date" value="${e(state.end)}"><button class="small-button" data-action="apply-range">应用</button></div>` : ""}`;
 }
 function scope() {
-  return `<div class="section-top"><h2>${state.tab === "summary" ? "用量概览" : state.tab === "analysis" ? "成本拆分" : state.tab === "latency" ? "延迟诊断" : state.tab === "distribution" ? "用量分布" : "认证账户"}</h2><span class="scope-tag" title="${e(state.keys.find((k) => String(k.id) === state.key)?.label || "全部 Key")}">${e(ranges[state.range])} · ${e(state.keys.find((k) => String(k.id) === state.key)?.label || "全部 Key")}</span></div>`;
+  return `<div class="section-top"><h2>${state.tab === "summary" ? "用量概览" : state.tab === "analysis" ? "成本拆分" : state.tab === "latency" ? "延迟诊断" : state.tab === "distribution" ? "用量分布" : "认证账户"}</h2><span class="scope-tag" title="${e(scopeLabel())}">${e(ranges[state.range])} · ${e(scopeLabel())}</span></div>`;
 }
 function empty(title, text, retry = true) {
   return `<div class="empty"><div class="empty-icon">${icon("link")}</div><h2>${e(title)}</h2><p>${e(text)}</p>${retry ? '<button class="small-button" data-action="refresh">重新读取</button>' : ""}</div>`;
@@ -173,13 +200,22 @@ function summary(data) {
       ],
       ["推理输出", number(a.reasoning_tokens)],
     ]) +
-    `<div id="live-summary">${liveSummary()}</div>`
+    `<div id="live-summary">${liveSummary()}</div>` +
+    (state.access?.role === "api_key_viewer"
+      ? note(
+          "sk 只读权限 · 仅显示此 Key 用量；Keeper 未向此角色开放成本拆分、延迟诊断和认证账户指标。",
+        )
+      : state.key
+        ? note(
+            "Key owner 已同步到悬浮球。认证账户额度及错误无法按 Key 归属，仅在全部 Key 下展示。",
+          )
+        : "")
   );
 }
 function liveSummary() {
   const s = state.sample;
-  if (!s) return note("下一次成功采样后显示全局新增用量。");
-  return `<div class="live-strip">${icon("shield")}<div><strong>全局${e(s.health.label)} <span>· 近 5 小时失败 ${number(s.health.failure)} 次</span></strong><p>${state.error ? "连接中断，等待重新采样" : s.delta.baseline ? "采样基线已建立，等待下一次更新" : `${Number(s.delta.seconds).toFixed(1)} 秒新增：输入 ${number(s.delta.input_tokens)} · 输出 ${number(s.delta.output_tokens)}`}</p></div></div>`;
+  if (!s) return note("下一次成功采样后显示当前范围的新增用量。");
+  return `<div class="live-strip">${icon("shield")}<div><strong>${e(s.health.label)} <span>· ${s.health.basis === "key_requests" ? "此 Key 近 5 小时请求失败" : "近 5 小时认证失败"} ${number(s.health.failure)} 次</span></strong><p>${state.error ? "连接中断，等待重新采样" : s.delta.baseline ? "采样基线已建立，等待下一次更新" : `${Number(s.delta.seconds).toFixed(1)} 秒新增：输入 ${number(s.delta.input_tokens)} · 输出 ${number(s.delta.output_tokens)}`}</p></div></div>`;
 }
 function costs(data) {
   const b = data.cost_breakdown || {};
@@ -492,7 +528,7 @@ function renderData() {
   $("#content").innerHTML = renders[state.tab](state.data);
 }
 async function load(background = false) {
-  if (!$("#content") || !state.visible) return;
+  if (!$("#content") || !state.visible || !state.access) return;
   if (
     state.range === "custom" &&
     (!state.start || !state.end || state.start > state.end)
@@ -512,10 +548,7 @@ async function load(background = false) {
   try {
     let data;
     if (state.tab === "accounts") {
-      const result = await api.call("get_view", {
-        view: "accounts",
-        query: query(),
-      });
+      const result = await viewCall("accounts", query());
       if (gen !== state.generation) return;
       state.accounts = result.identities || [];
       state.accountPages = result.total_pages || 1;
@@ -523,14 +556,12 @@ async function load(background = false) {
         state.account = String(state.accounts[0]?.id ?? "");
         state.cursor = "";
       }
-      data = state.account
-        ? await api.call("get_view", { view: state.accountTab, query: query() })
-        : {};
+      data = state.account ? await viewCall(state.accountTab, query()) : {};
     } else
-      data = await api.call("get_view", {
-        view: state.tab === "distribution" ? "analysis" : state.tab,
-        query: query(),
-      });
+      data = await viewCall(
+        state.tab === "distribution" ? "analysis" : state.tab,
+        query(),
+      );
     if (gen !== state.generation) return;
     state.data = data;
     state.refreshedAt = Date.now();
@@ -557,16 +588,12 @@ function updateSample() {
     $("#delta-output").textContent = compact(delta.output);
     $("#delta-input").title = number(delta.input);
     $("#delta-output").title = number(delta.output);
-    const interval = state.error
-      ? "等待重新连接"
-      : !s
-        ? "等待首次采样"
-        : s.delta.baseline
-          ? "已建立采样基线"
-          : `${s.delta.seconds.toFixed(1)}s 内新增`;
-    $("#widget").title =
-      state.error ||
-      `全局统计 · 北京时间今日 · ${health}\n${interval}${delta.held ? " · 暂留上次用量，连续零用量 16 秒后归零" : ""}\n悬停查看详情，拖动移动，右键打开菜单`;
+    // No native title tooltip over the compact widget; details have the full context.
+    $("#widget").removeAttribute("title");
+    $("#widget").setAttribute(
+      "aria-label",
+      `Keeper ${scopeLabel()}用量，悬停或点击查看详情，拖动移动`,
+    );
   }
   if ($("#connection")) {
     $("#connection").className =
@@ -585,9 +612,17 @@ function updateSample() {
   }
 }
 async function openDetail() {
+  if (!$("#content")) return;
   state.visible = true;
+  if (!state.access) {
+    try {
+      await refreshAccess();
+    } catch (error) {
+      $("#content").innerHTML = empty("请连接 Keeper", String(error), false);
+      return;
+    }
+  }
   state.range = "today";
-  state.key = "";
   state.tab = "summary";
   state.cursor = "";
   renderFilters();
@@ -598,7 +633,8 @@ async function openDetail() {
 }
 function settings() {
   const s = state.settings;
-  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper</div><span class="spacer"></span><span class="eyebrow">连接设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body"><label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><label class="field">登录密码<input type="password" name="password" placeholder="${s.hasPassword ? "已保存密码，留空继续使用" : "Keeper 登录密码，不是 API Key"}" autocomplete="current-password"></label><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住密码 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row"><input type="checkbox" name="clearPassword">清除已保存密码（适用于无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details><hr class="setting-divider"><div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label>外观</label><div class="segments">${[
+  const sk = s.authMode === "api_key";
+  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper</div><span class="spacer"></span><span class="eyebrow">连接设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body"><label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><div class="preference-row"><label for="auth-mode">登录方式</label><select id="auth-mode" name="authMode"><option value="admin" ${sk ? "" : "selected"}>管理员密码</option><option value="api_key" ${sk ? "selected" : ""}>API Key（sk）</option></select></div><label class="field"><span id="credential-label">${sk ? "CPA API Key（sk）" : "管理员登录密码"}</span><input type="password" name="password" placeholder="${s.hasPassword ? "已保存凭据，留空继续使用" : sk ? "sk-…" : "Keeper 管理员密码"}" autocomplete="current-password" spellcheck="false"></label><p class="field-hint" id="auth-hint">${sk ? "仅可查看此 Key 的用量，不开放管理员指标。" : "可查看全部用量，或按 Key owner 筛选。"}</p><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住登录凭据 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row" id="clear-credential"><input type="checkbox" name="clearPassword">清除已保存凭据（无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details><hr class="setting-divider"><div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label>外观</label><div class="segments">${[
     ["light", "浅色"],
     ["dark", "深色"],
   ]
@@ -612,7 +648,7 @@ function settings() {
 }
 
 root.innerHTML = preview
-  ? `<div class="preview-stage ${search.has("standalone") ? "standalone" : ""} ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / 0.3　·　界面预览，示例数据</div></div>`
+  ? `<div class="preview-stage ${search.has("standalone") ? "standalone" : ""} ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / 0.4　·　界面预览，示例数据</div></div>`
   : windowName === "widget"
     ? widget()
     : windowName === "settings"
@@ -659,6 +695,18 @@ document.addEventListener("click", async (event) => {
   if (b.dataset.pick) {
     const { pick, value } = b.dataset;
     b.closest("details")?.removeAttribute("open");
+    if (pick === "key") {
+      if (state.switchingScope) return;
+      state.switchingScope = true;
+      try {
+        applyAccess(await api.call("set_scope", { apiKeyId: value }));
+      } catch (error) {
+        $("#content").innerHTML = empty("无法切换 Key owner", String(error));
+      } finally {
+        state.switchingScope = false;
+      }
+      return;
+    }
     state.cursor = pick === "cursor" ? value : "";
     if (pick === "accountPage") {
       state.accountPage += Number(value);
@@ -691,6 +739,26 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Enter" && event.target.id === "widget") action("detail");
 });
+document.addEventListener("change", (event) => {
+  if (event.target.id !== "auth-mode") return;
+  const sk = event.target.value === "api_key";
+  const field = $("[name=password]");
+  field.value = "";
+  field.placeholder =
+    state.settings.hasPassword &&
+    event.target.value === (state.settings.authMode || "admin")
+      ? "已保存凭据，留空继续使用"
+      : sk
+        ? "sk-…"
+        : "Keeper 管理员密码";
+  $("#credential-label").textContent = sk
+    ? "CPA API Key（sk）"
+    : "管理员登录密码";
+  $("#auth-hint").textContent = sk
+    ? "仅可查看此 Key 的用量，不开放管理员指标。"
+    : "可查看全部用量，或按 Key owner 筛选。";
+  if ($("#clear-credential")) $("#clear-credential").hidden = sk;
+});
 document.addEventListener("submit", async (event) => {
   if (event.target.id !== "settings-form") return;
   event.preventDefault();
@@ -705,6 +773,7 @@ document.addEventListener("submit", async (event) => {
         ...state.settings,
         endpoint: form.get("endpoint"),
         password: form.get("password"),
+        authMode: form.get("authMode"),
         proxyUrl: form.get("proxyUrl"),
         widgetFont: form.get("widgetFont"),
         pollSeconds: Number(form.get("pollSeconds")),
@@ -742,13 +811,25 @@ if ($("#widget")) {
     ) {
       dragging = true;
       down = null;
-      action("drag");
+      $("#widget").classList.add("dragging");
+      action("drag").then((ok) => {
+        if (!ok) cancelDrag();
+      });
     }
   });
   $("#widget").addEventListener("pointerup", () => {
     if (down && !dragging) action("detail");
     down = null;
+    $("#widget").classList.remove("dragging");
   });
+  const cancelDrag = () => {
+    down = null;
+    dragging = false;
+    $("#widget").classList.remove("dragging");
+  };
+  $("#widget").addEventListener("pointercancel", cancelDrag);
+  window.addEventListener("blur", cancelDrag);
+  api.on("drag-finished", cancelDrag);
   $("#widget").addEventListener("contextmenu", (event) => {
     event.preventDefault();
     if ($("#widget-menu")) {
@@ -764,6 +845,107 @@ if ($("#widget")) {
     $("#widget-menu")?.remove();
   });
 }
+function applyAccess(access) {
+  if (access.scope.revision < state.revision) return;
+  const changed =
+    !state.access ||
+    access.scope.revision !== state.revision ||
+    access.role !== state.access.role;
+  state.access = access;
+  state.revision = access.scope.revision;
+  state.key = access.scope.api_key_id;
+  if (changed) {
+    state.generation++;
+    state.loading = false;
+    state.sample = null;
+    state.error = "";
+    state.data = null;
+    state.cursor = "";
+    state.accounts = [];
+    state.account = "";
+    widgetDelta.clear();
+    if (!availableTabs().some(([id]) => id === state.tab))
+      state.tab = "summary";
+    updateSample();
+  }
+  const nav = $(".tabs");
+  if (nav)
+    nav.innerHTML = availableTabs()
+      .map(
+        ([id, label, i]) =>
+          `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`,
+      )
+      .join("");
+  renderFilters();
+  if (changed && $("#content")) {
+    $("#content").innerHTML = "";
+    load();
+  }
+}
+async function refreshAccess() {
+  const epoch = state.epoch;
+  const access = await api.call("get_access");
+  if (epoch !== state.epoch) return;
+  applyAccess(access);
+  if ($("#filters") && access.role === "admin") {
+    const revision = state.revision;
+    const keys = await viewCall("keys", { range: "today" }).catch(() => ({}));
+    if (epoch !== state.epoch || revision !== state.revision) return;
+    state.keys = keys.options || [];
+    renderFilters();
+  }
+}
+function acceptSample(s) {
+  if (s && s.revision !== undefined && s.revision !== state.revision) return;
+  state.sample = s;
+  state.error = "";
+  updateSample();
+}
+await api.on("configured", async ({ settings: s, revision }) => {
+  state.revision = revision;
+  state.epoch++;
+  state.generation++;
+  state.loading = false;
+  state.settings = s;
+  state.access = null;
+  state.sample = null;
+  state.error = "";
+  state.keys = [];
+  applyAppearance();
+  updateSample();
+  if (windowName !== "settings") {
+    if ($("#content")) $("#content").innerHTML = "";
+    if ($(".tabs")) $(".tabs").innerHTML = "";
+    try {
+      await refreshAccess();
+    } catch (error) {
+      state.error = String(error);
+      updateSample();
+    }
+  }
+});
+await api.on("settings-open", async () => {
+  if (windowName === "settings") {
+    state.settings = await api.call("get_settings");
+    applyAppearance();
+    root.innerHTML = settings();
+  }
+});
+if (windowName !== "settings") {
+  await api.on("scope-changed", applyAccess);
+  await api.on("sample", acceptSample);
+  await api.on("connection-error", (error) => {
+    if (typeof error === "object" && error.revision !== state.revision) return;
+    state.error = String(error.message || error);
+    updateSample();
+  });
+  await api.on("detail-open", openDetail);
+  await api.on("detail-close", () => {
+    state.visible = false;
+    state.generation++;
+    state.loading = false;
+  });
+}
 try {
   state.settings = await api.call("get_settings");
   applyAppearance();
@@ -771,71 +953,32 @@ try {
     if (preview) $(".preview-panel").innerHTML = settings();
     else root.innerHTML = settings();
   } else {
-    await api.on("sample", (s) => {
-      state.sample = s;
-      state.error = "";
-      updateSample();
-    });
-    await api.on("connection-error", (error) => {
-      state.error = String(error);
-      updateSample();
-    });
-    await api.on("detail-open", () => openDetail());
-    await api.on("detail-close", () => {
-      state.visible = false;
-      state.generation++;
-    });
-    state.sample = await api.call("last_sample");
-    updateSample();
-    if ($("#filters")) {
-      const keys = await api
-        .call("get_view", { view: "keys", query: { range: "today" } })
-        .catch(() => ({}));
-      state.keys = keys.options || [];
-      renderFilters();
-      await load();
-    }
+    await refreshAccess();
+    acceptSample(await api.call("last_sample"));
   }
-  await api.on("configured", async (s) => {
-    state.settings = s;
-    state.sample = null;
-    state.error = "";
-    state.keys = [];
-    applyAppearance();
-    updateSample();
-    if ($("#filters")) {
-      state.keys =
-        (
-          await api
-            .call("get_view", { view: "keys", query: { range: "today" } })
-            .catch(() => ({}))
-        ).options || [];
-      renderFilters();
-    }
-  });
-  await api.on("settings-open", async () => {
-    if (windowName === "settings") {
-      state.settings = await api.call("get_settings");
-      applyAppearance();
-      root.innerHTML = settings();
-    }
-  });
 } catch (error) {
+  state.error = String(error);
+  updateSample();
   if ($("#content"))
-    $("#content").innerHTML = empty("请在桌面应用中打开", String(error), false);
+    $("#content").innerHTML = empty("暂时无法读取", String(error));
 }
 
 if (windowName === "widget" || (preview && windowName !== "settings")) {
   const poll = async () => {
     const started = performance.now();
     if (state.settings.endpoint && !document.hidden) {
+      const epoch = state.epoch,
+        revision = state.revision;
       try {
-        state.sample = await api.call("sample");
-        state.error = "";
+        const next = await api.call("sample");
+        if (epoch === state.epoch && revision === state.revision)
+          acceptSample(next);
       } catch (error) {
-        state.error = String(error);
+        if (epoch === state.epoch && revision === state.revision) {
+          state.error = String(error);
+          updateSample();
+        }
       }
-      updateSample();
     }
     setTimeout(
       poll,
