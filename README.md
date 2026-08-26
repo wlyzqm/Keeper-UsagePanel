@@ -52,6 +52,38 @@
 
 ## 开发
 
+### Windows 本机构建前置条件
+
+只运行成品 EXE 无需安装 Rust 或 C++ 编译工具；下面仅用于从源码构建。
+
+1. 安装 [Microsoft C++ 生成工具](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，勾选「使用 C++ 的桌面开发」，保留 MSVC x64/x86 工具与 Windows SDK。
+2. 安装 Rust（包含 Cargo）。可在 PowerShell 执行 `winget install --id Rustlang.Rustup -e`，没有 winget 时使用 [Rust 官方安装器](https://www.rust-lang.org/tools/install)。
+3. 安装完成后关闭并重新打开终端；若使用 VS Code 集成终端，重启 VS Code。确认 WebView2 运行时已安装。
+4. 在新的 PowerShell 中选择 MSVC 工具链并检查 Cargo：
+
+```powershell
+rustup default stable-x86_64-pc-windows-msvc
+cargo --version
+rustc --version
+```
+
+若报 `cargo metadata ... program not found`，说明当前终端找不到 Cargo，还未进入项目编译。`npm ci` 不会安装 Rust。可先检查默认安装位置：
+
+```powershell
+Test-Path "$env:USERPROFILE\.cargo\bin\cargo.exe"
+```
+
+若返回 `True`，可为当前 PowerShell 临时补充 PATH 后重试：
+
+```powershell
+$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
+cargo --version
+```
+
+若仍无法识别，检查 Rust 安装器是否成功完成，以及是否自定义过 `CARGO_HOME`；不要通过重装 npm 依赖处理此错误。完整环境要求见 [Tauri 官方前置要求](https://v2.tauri.app/zh-cn/start/prerequisites/)。
+
+### 项目命令
+
 ```sh
 npm ci
 npm run dev          # 前端
