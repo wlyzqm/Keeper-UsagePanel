@@ -1,6 +1,6 @@
 # Windows 10 / 11 验收清单 · 0.2.0
 
-本轮在 Linux 完成前端 Chromium 验收及 Windows 交叉编译，不等于 Windows 原生窗口行为已验证。请使用 0.2.0 的 EXE。
+前端 Chromium 验收不等于 Windows 原生窗口行为已验证。构建与自动化测试结果见 VERIFICATION.md；以下交互项目请使用 0.2.0 的 EXE 在 Windows 10 / 11 上验收。
 
 1. 首次启动：无预置地址；填写 Keeper 地址与登录密码；保存前成功验证；关闭后再启动可恢复。旧版配置能读取。
 2. 图标：窗口、托盘、EXE 使用彩色 Keeper 图标；默认浅色，深色切换并重启保持。

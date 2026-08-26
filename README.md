@@ -6,7 +6,11 @@
 
 ## 使用
 
+[下载 0.2.0 Windows 构建产物（安装 EXE + 便携 EXE）](https://github.com/wlyzqm/Keeper-UsagePanel/actions/runs/32960071438/artifacts/9603817801)。这是 CI 产物，当前保留至 2026-11-24，请及时下载留存。
+
 推荐运行 `Keeper UsagePanel_0.2.0_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
+
+升级前请先退出旧版。安装包和程序未做代码签名，可使用交付目录中的 `SHA256SUMS.txt` 核对文件。
 
 首次启动填写完整 Keeper 地址，例如 `https://keeper.example/usage`，以及 Keeper 登录密码（不是 sk）。保存前验证登录。配置写入 `HKCU\Software\KeeperUsagePanel`，兼容 0.1.0 的地址、密码和位置配置。
 
