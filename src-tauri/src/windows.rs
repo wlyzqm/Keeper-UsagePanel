@@ -51,9 +51,9 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     let show = MenuItem::with_id(app, "show", "显示悬浮球", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "settings", "连接设置", true, None::<&str>)?;
-    let hide = MenuItem::with_id(app, "hide", "隐藏悬浮球", true, None::<&str>)?;
+    let hide_item = MenuItem::with_id(app, "hide", "隐藏悬浮球", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &setup, &hide, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &setup, &hide_item, &quit])?;
     tauri::tray::TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("Keeper · 用量面板")
