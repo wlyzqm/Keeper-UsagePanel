@@ -1,0 +1,145 @@
+name: Publish Windows release
+on:
+  workflow_run:
+    workflows: [Build and test]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Windows build run ID
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve successful trusted build
+        id: build
+        uses: actions/github-script@v7
+        env:
+          REQUESTED_RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+        with:
+          script: |
+            const runId = Number(process.env.REQUESTED_RUN_ID);
+            const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: runId });
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            if (run.conclusion !== 'success' || run.head_branch !== 'main' ||
+                run.head_repository.full_name !== repository ||
+                !['push', 'workflow_dispatch'].includes(run.event) ||
+                run.path !== '.github/workflows/build.yml') {
+              throw new Error('Only successful main-branch Windows builds from this repository may be released.');
+            }
+            core.setOutput('run_id', runId);
+            core.setOutput('sha', run.head_sha);
+            core.setOutput('url', run.html_url);
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.build.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: KeeperUsagePanel-windows-x64
+          path: artifacts
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.build.outputs.run_id }}
+      - name: Package binaries and checksums
+        env:
+          BUILD_SHA: ${{ steps.build.outputs.sha }}
+          BUILD_URL: ${{ steps.build.outputs.url }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, shutil, zipfile
+          from pathlib import Path
+          version = json.loads(Path('package.json').read_text())['version']
+          assert re.fullmatch(r'\d+\.\d+\.\d+', version), 'Use a three-part release version'
+          out = Path('release-assets')
+          out.mkdir()
+          shutil.copyfile('artifacts/KeeperUsagePanel.exe', out / 'KeeperUsagePanel.exe')
+          setup = f'Keeper UsagePanel_{version}_x64-setup.exe'
+          shutil.copyfile(Path('artifacts/bundle/nsis') / setup, out / f'KeeperUsagePanel_{version}_x64-setup.exe')
+          readme = f'''Keeper UsagePanel {version} / Windows 10 & 11 x64
+
+          便携版：解压后运行 KeeperUsagePanel.exe，需要 Microsoft WebView2。
+          安装版：运行同版本 setup.exe；缺少 WebView2 时联网安装。
+          无需 Rust、Cargo 或 .NET。升级前退出旧版，现有配置保留在当前用户注册表。
+          首次启动填写 Keeper 地址和登录密码；设置支持 HTTP/SOCKS5 代理及字体。
+          两路增量同时为 0 时暂留上一组结果，连续零用量达到 16 秒后归零。
+          程序未签名。原生窗口及真实 Keeper 连接请按 WINDOWS-ACCEPTANCE.md 验收。
+
+          源码：{os.environ['BUILD_SHA']}
+          构建：{os.environ['BUILD_URL']}
+          '''
+          with zipfile.ZipFile(out / f'KeeperUsagePanel-{version}-win-x64.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+              def add(name, data):
+                  z.writestr(zipfile.ZipInfo(name), data, compress_type=zipfile.ZIP_DEFLATED)
+              add('KeeperUsagePanel.exe', (out / 'KeeperUsagePanel.exe').read_bytes())
+              add('README.txt', readme)
+              for path in [Path('WINDOWS-ACCEPTANCE.md'), Path('THIRD-PARTY-NOTICES.md'), *sorted(Path('docs').glob('*'))]:
+                  if path.is_file(): add(str(path), path.read_bytes())
+          entries = []
+          for path in sorted(out.iterdir()):
+              entries.append(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}')
+          (out / 'SHA256SUMS.txt').write_text('\n'.join(entries) + '\n')
+          Path('release-manifest.json').write_text(json.dumps({'version': version, 'tag': f'v{version}'}))
+          PY
+      - name: Publish complete release
+        uses: actions/github-script@v7
+        env:
+          BUILD_SHA: ${{ steps.build.outputs.sha }}
+          BUILD_URL: ${{ steps.build.outputs.url }}
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const { version, tag } = JSON.parse(fs.readFileSync('release-manifest.json', 'utf8'));
+            const sha = process.env.BUILD_SHA;
+            const files = fs.readdirSync('release-assets');
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ ...context.repo, tag })).data;
+            } catch (error) { if (error.status !== 404) throw error; }
+            try {
+              const commit = (await github.rest.repos.getCommit({ ...context.repo, ref: tag })).data;
+              if (commit.sha !== sha) throw new Error('This version already points to different source. Bump the version before publishing.');
+            } catch (error) { if (error.status !== 404) throw error; }
+            if (release && !release.draft) {
+              const assets = (await github.rest.repos.listReleaseAssets({ ...context.repo, release_id: release.id })).data;
+              for (const name of files) {
+                const digest = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(`release-assets/${name}`)).digest('hex');
+                if (!assets.some(asset => asset.name === name && asset.digest === digest)) {
+                  throw new Error('Published release differs from this build; existing assets will not be overwritten.');
+                }
+              }
+              core.info(`Already published: ${release.html_url}`);
+              return;
+            }
+            const body = [
+              `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
+              '',
+              '- setup.exe：安装版；缺少 WebView2 时联网安装。',
+              '- win-x64.zip：便携版、说明与验收清单；需已有 WebView2。',
+              '- KeeperUsagePanel.exe：独立便携程序。',
+              '- SHA256SUMS.txt：上述文件校验值。',
+              '',
+              '运行成品无需 Rust / Cargo / .NET。升级前退出旧版。程序未签名，Windows 原生交互仍需实机验收。',
+              '',
+              `源码提交：\`${sha}\``,
+              `Windows 构建与测试：${process.env.BUILD_URL}`,
+            ].join('\n');
+            if (!release) release = (await github.rest.repos.createRelease({ ...context.repo, tag_name: tag, target_commitish: sha, name: `Keeper UsagePanel ${version}`, body, draft: true })).data;
+            const assets = (await github.rest.repos.listReleaseAssets({ ...context.repo, release_id: release.id })).data;
+            for (const name of files) {
+              const previous = assets.find(asset => asset.name === name);
+              if (previous) await github.rest.repos.deleteReleaseAsset({ ...context.repo, asset_id: previous.id });
+              await github.rest.repos.uploadReleaseAsset({ ...context.repo, release_id: release.id, name, data: fs.readFileSync(`release-assets/${name}`) });
+            }
+            await github.rest.repos.updateRelease({ ...context.repo, release_id: release.id, body, draft: false, make_latest: 'true' });
+            core.info(`Published ${release.html_url}`);

@@ -6,9 +6,9 @@
 
 ## 使用
 
-[Windows 构建记录与下载](https://github.com/wlyzqm/Keeper-UsagePanel/actions/workflows/build.yml)。0.3.0 的成品链接与校验值在构建完成后补齐。
+[下载 Windows 版（GitHub Release）](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件。
 
-推荐运行 `Keeper UsagePanel_0.3.0_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
+推荐运行 `KeeperUsagePanel_0.3.0_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
 
 升级前请先退出旧版。安装包和程序未做代码签名，可使用交付目录中的 `SHA256SUMS.txt` 核对文件。
 
@@ -97,6 +97,6 @@ npm run tauri build -- --target x86_64-pc-windows-msvc
 
 浏览器开发预览：`http://127.0.0.1:1420/?preview=1`，加 `theme=dark`、`state=empty|offline|long`、`window=settings` 检查界面状态。加 `standalone` 按独立窗口尺寸预览；`window=widget&standalone` 仅预览悬浮块。预览显式标注示例数据，不连接真实 Keeper，不写注册表。
 
-Linux 交叉编译可使用 `bash scripts/build-linux.sh`，需要 Rust Windows MSVC target、LLVM、cargo-xwin 0.23+、NSIS。默认使用 clang 与预制 Windows sysroot，限制为单编译任务，并降低生成式 Windows 绑定库的优化级别，减少小内存机器的构建开销。GitHub Actions 使用 Windows runner 构建安装版与便携版。
+Linux 交叉编译可使用 `bash scripts/build-linux.sh`，需要 Rust Windows MSVC target、LLVM、cargo-xwin 0.23+、NSIS。默认使用 clang 与预制 Windows sysroot，限制为单编译任务，并降低生成式 Windows 绑定库的优化级别，减少小内存机器的构建开销。GitHub Actions 使用 Windows runner 构建安装版与便携版。主分支构建成功后，发布流程按 package.json 版本创建 Release，标签指向实际构建提交；先上传完整附件再公开发布。PR 构建不发布。同一版本不覆盖不同源码的成品，修改程序后需升级版本号；可手动指定成功的主分支 build run ID 补发。
 
 见 [Windows 验收清单](WINDOWS-ACCEPTANCE.md)、[验证记录](VERIFICATION.md)、[设计说明](docs/DESIGN.md)。
