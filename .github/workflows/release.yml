@@ -106,10 +106,16 @@ jobs:
             try {
               release = (await github.rest.repos.getReleaseByTag({ ...context.repo, tag })).data;
             } catch (error) { if (error.status !== 404) throw error; }
+            let tagExists = false;
             try {
+              await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` });
+              tagExists = true;
+            } catch (error) { if (error.status !== 404) throw error; }
+            if (tagExists) {
               const commit = (await github.rest.repos.getCommit({ ...context.repo, ref: tag })).data;
               if (commit.sha !== sha) throw new Error('This version already points to different source. Bump the version before publishing.');
-            } catch (error) { if (error.status !== 404) throw error; }
+            }
+            if (release?.draft && release.target_commitish !== sha) throw new Error('Existing draft points to different source.');
             if (release && !release.draft) {
               const assets = (await github.rest.repos.listReleaseAssets({ ...context.repo, release_id: release.id })).data;
               for (const name of files) {
