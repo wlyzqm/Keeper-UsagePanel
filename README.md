@@ -1,118 +1,88 @@
-# Keeper UsagePanel 0.4.3
+# Keeper UsagePanel
 
-面向 Windows 10 / 11 x64 的 Keeper 置顶悬浮球。Tauri 2 + Rust + HTML/CSS，直接连接既有 Keeper，不安装远程适配服务，不启动本地 HTTP 服务。
+## 项目简介
 
-![浅色界面，示例数据](docs/overview-light.png)
+Keeper UsagePanel 是面向 Windows 10 / 11 x64 的 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper) 桌面用量面板。应用通过 Keeper API 读取数据，以置顶悬浮块和详情窗口展示 Token 用量、请求健康、成本及账户额度；无需额外部署适配服务，也不会启动本地 HTTP 服务。
 
-## 使用
+![Keeper UsagePanel 总览](docs/overview-light.png)
 
-[Windows Release 下载入口](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件；历史成品校验信息见 [验证记录](VERIFICATION.md)。
+## 功能特性
 
-推荐运行 `KeeperUsagePanel_0.4.3_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
+- **桌面悬浮监控**：置顶显示北京时间今日 Token 总量，以及最近采样区间的输入、输出增量；支持拖动、屏幕边缘吸附、悬停或点击展开详情。
+- **管理员总览**：支持今日、近 7 天、近 30 天和自定义日期范围，可查看全部 Key 或按 Key owner 筛选，并提供用量、成本、延迟、分布和认证账户信息。
+- **状态与主题**：以健康状态点和文字结论展示连接及请求状态，支持浅色、深色主题和自定义悬浮块字体。
+- **安全连接**：支持 Keeper 管理员密码或 API Key（sk）登录、HTTP/SOCKS5 代理；凭据和代理认证信息使用 Windows DPAPI 加密保存在当前用户配置中。
+- **快捷入口**：可从详情窗口在系统默认浏览器中打开 Keeper 用量控制台和 CPA 控制台。
 
-升级前请先退出旧版。安装包和程序未做代码签名，可使用交付目录中的 `SHA256SUMS.txt` 核对文件。
+### API Key（sk）只读视图
 
-首次启动填写完整 Keeper 地址，例如 `https://keeper.example/usage`，选择「管理员密码」或「API Key（sk）」登录。保存前验证登录。配置写入 `HKCU\Software\KeeperUsagePanel`，兼容 0.1.0 的地址、密码和位置配置。
+sk 登录仅展示当前 Key 可访问的用量与健康数据，不开放管理员页签、其他 Key 的数据或 CPA 管理入口。
 
-- 紧凑圆角悬浮块：200 × 58 DIP，左侧状态点，中间北京时间今日 Token 总量，右侧输入 / 输出。
-- 输入 / 输出：上次成功采样到本次成功采样的增量，默认 2 秒，不是每秒速率。两者同时为 0 时暂留上一组结果；连续零用量累计达到 16 秒后归零。有任一路新增就显示本次完整一组并重新计时。首采样、计数重置或断线显示 —。详情始终显示真实本次采样值。
-- 状态点表示健康类别；悬停提示和详情显示“健康”“波动”等结论，断线明确显示离线。
-- 悬停展开详情，离开两窗后收起；球与面板间保留穿越区域。拖动移动，靠近边缘时吸附并记住位置。
-- 点击悬浮块也能展开（保留悬停入口）；普通鼠标样式不变，实际拖动时才显示拖动样式。设置窗不置顶，可独立切换到其他应用复制密码；右键或托盘可设置、隐藏、退出。详情 Esc 收起，设置 Esc 关闭。
-- 今日 / 近 7 天 / 近 30 天 / 昨日 / 本月 / 自定义日期，管理员可选 Key owner；面板和悬浮块同步到同一个 Key。日期范围仅改变详情，悬浮块仍显示北京时间今日。重新连接或重启后管理员默认全部 Key。
-- 蓝色高对比配色，主指标统一 26px。静态文字不可选中；输入框保留选择、复制、粘贴。数字与时间不换行，宽明细表在表格内部横向滚动。
-- 管理员全局模式提供总览、成本、延迟、用量分布，以及认证账户的概览、额度历史、请求明细和错误事件。只显示数值、表格与事件摘要，不显示图表。
+![API Key 只读视图](docs/sk-overview.png)
 
-## sk 与 Key owner 权限
+### 认证账户与额度
 
-- sk 使用 Keeper 的 `auth/api-key-login`，随后验证 `auth/session` 的 `api_key_viewer` 角色；只调用 `key-overview` 和 `key-activity`。显示自身请求数、Token 组成、缓存率、总成本及请求健康；不显示管理页签和 Key 切换器。
-- 管理员通过 `usage/api-keys/options` 的别名 / 脱敏标签选择 Key owner。共享范围由 Rust 管理；切换即清空旧采样和 16 秒暂留，旧范围返回不能覆盖新范围，下一次成功采样重新建立基线。
-- 权限在 Rust 请求层再次限制，不能通过隐藏页签或 IPC 参数访问管理员指标。sk 不接受其他 Key ID；Keeper 关闭认证时 sk 模式拒绝意外返回的管理员身份。
-- Keeper 对 sk 的 overview / activity 各限每秒一次；面板和悬浮块共享节流，忙碌时使用实际采样间隔。无效凭据停止自动登录重试，修改设置后重连。
+管理员可查看认证账户概览、当前额度、额度历史、请求明细和错误事件。额度数据只读取 Keeper 已有缓存，不会触发上游额度刷新。
 
-## 控制台入口
+![认证账户额度](docs/quota-light.png)
 
-浮窗标题栏按「连接状态 → 用量控制台 → CPA 控制台 → 设置」排列。设置改为醒目的长条文字按钮。
+### 连接设置
 
-- 用量控制台在 Windows 默认浏览器打开设置中提供的 Keeper 地址。
-- 管理员点击 CPA 控制台时读取 `/api/v1/status.cpa_public_url`，按 Keeper 的规则补上 `management.html`，支持完整地址、子路径与裸域名。Keeper 未设置该字段时，与 Keeper 网页一样使用当前源的 `/management.html`。
-- `status` 是管理员接口；sk 模式保留禁用的 CPA 按钮并解释权限限制，不请求管理接口或猜测另一个 CPA 域名。
-- 只允许 HTTP / HTTPS 链接，不传递应用内的密码、sk 或会话 Cookie；浏览器与桌面应用各自登录；外部浏览器使用自己的网络 / 代理配置，不继承本工具代理。
+可配置 Keeper 地址、登录方式、刷新间隔、主题、字体和可选代理。管理员凭据、sk 与带认证信息的代理地址不会以明文保存。
 
-## 代理与字体
+![连接设置](docs/settings.png)
 
-设置中展开「代理设置」，留空表示直连，不继承环境变量代理。
+## 项目依赖
 
-- `http://127.0.0.1:7890`、`https://proxy.example:8443`
-- `socks5://127.0.0.1:1080`（客户端解析目标 DNS）
-- `socks5h://127.0.0.1:1080`（代理解析目标 DNS）
-- 需要认证时：`scheme://用户名:密码@主机:端口`，特殊字符需 URL 编码。所有 Keeper 请求使用同一个代理，不失败回退直连。
+| 项目                                                               | 用途                                                                   |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)    | 本项目的直接数据源，负责持久化和聚合 CPA 用量，并提供统计与认证接口。  |
+| [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) | 产生模型请求和用量数据；Keeper 从 CPA 采集数据，本项目不直接连接 CPA。 |
 
-悬浮球字体可填本机字体名称。默认 `HarmonyOS Sans SC`；不存在时依次回退 `Microsoft YaHei UI`、`Microsoft YaHei`、`Noto Sans CJK SC`、系统 sans-serif。自定义字体缺失时先回退鸿蒙黑体，再走上述序列。不内置或下载鸿蒙字体。详情的拉丁数字使用随包的 Manrope，中文使用系统字体。
+使用前需要先部署并正确配置 CPA 与 Keeper，确保 Keeper 能够持续采集 CPA 用量。
 
-## 配置与安全
+## 如何使用
 
-`Endpoint`、`AuthMode`、`PollSeconds`、`RememberPassword`、`AllowPrivateHttp`、`AutoStart`、`Theme`、`WidgetFont`、`X`、`Y` 保存为注册表值。可选登录凭据（密码或 sk）`ProtectedPassword` 和代理地址 `ProtectedProxyUrl` 使用 Windows DPAPI 当前用户加密。
+1. 从 [GitHub Releases](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest) 下载最新版。推荐使用 `KeeperUsagePanel_<版本>_x64-setup.exe`；已有 Microsoft WebView2 Runtime 时也可直接运行便携版 `KeeperUsagePanel.exe`。
+2. 首次启动后填写完整的 Keeper 页面地址，例如 `https://keeper.example/usage`。
+3. 选择“管理员密码”或“API Key（sk）”，输入凭据后保存并连接。
+4. 悬停或点击悬浮块查看详情；右键悬浮块或使用系统托盘可打开设置、隐藏窗口或退出应用。
 
-不把登录密码或完整 sk 返回给前端；设置显示「已保存，留空继续使用」；仅在登录方式与 Keeper 地址均未改变时复用旧凭据。会话 Cookie 只驻留 Rust 内存。HTTPS 校验证书，不关闭证书校验。非本机 HTTP 需显式勾选专网确认。界面仅加载内置资源；开发用示例数据不会打入 EXE。图标使用用户提供的 Keeper SVG。
+Keeper 应使用 `Asia/Shanghai` 时区，以保证“今日”数据与面板的北京时间口径一致。升级前请先退出旧版本；应用当前未做代码签名，Windows 首次运行时可能显示安全提示。
 
-## 统计边界
+## 搭建开发环境
 
-- 适配 Keeper 1.14.8 的 `/api/v1` 接口。Keeper 时区需为 `Asia/Shanghai`。Windows 的本地时区不影响北京时间口径。
-- 增量从相邻成功采样的今日累计值做差；失败不更新基线。跨午夜读取旧日期的 analysis 汇总（sk 使用 key-activity）接续，无法接续或计数倒退时重新建立基线。重启不回放历史增量。
-- 今日之外的详情使用 overview / analysis 的日期范围；缓存和推理属于子项，不重复计入 Token 总量。
-- 管理员全局健康聚合 Keeper 凭据健康五小时窗口；所选 Key / sk 模式从 Keeper Activity 分块中截取最近五小时请求成功与失败数，不使用 Activity 顶层约 24 小时总数，并复用 Keeper 的阈值公式。两者统计对象不同，详情明确标注。
-- 成本是 Keeper 价格配置的 API 等价估算，不等于订阅真实扣费；价格缺失显示 —。
-- 认证账户指标仅在管理员全部 Key 下显示：额度、额度历史与错误事件没有可靠的 Key 归属，不把共享数据标成某个 Key 的数据。账户概览是累计统计。只读配额缓存，不触发上游配额刷新。
-- 请求明细按日期、Key、账户筛选。错误接口不支持日期 / Key 查询，因此日期在当前游标页内筛选，明确显示本页条数；不能视为日期范围总数。
-- 断线后的下一次成功增量可能覆盖较长间隔，显示实际秒数。历史回填到已关闭日期不保证包含在实时增量中。
+### 环境要求
 
-## 开发
+- Windows 10 / 11 x64
+- Node.js 24 与 npm
+- Rust stable（`x86_64-pc-windows-msvc` 工具链）
+- Microsoft C++ Build Tools，安装“使用 C++ 的桌面开发”、MSVC 和 Windows SDK
+- Microsoft WebView2 Runtime
 
-### Windows 本机构建前置条件
-
-只运行成品 EXE 无需安装 Rust 或 C++ 编译工具；下面仅用于从源码构建。
-
-1. 安装 [Microsoft C++ 生成工具](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，勾选「使用 C++ 的桌面开发」，保留 MSVC x64/x86 工具与 Windows SDK。
-2. 安装 Rust（包含 Cargo）。可在 PowerShell 执行 `winget install --id Rustlang.Rustup -e`，没有 winget 时使用 [Rust 官方安装器](https://www.rust-lang.org/tools/install)。
-3. 安装完成后关闭并重新打开终端；若使用 VS Code 集成终端，重启 VS Code。确认 WebView2 运行时已安装。
-4. 在新的 PowerShell 中选择 MSVC 工具链并检查 Cargo：
+### 本地开发
 
 ```powershell
+git clone https://github.com/wlyzqm/Keeper-UsagePanel.git
+cd Keeper-UsagePanel
 rustup default stable-x86_64-pc-windows-msvc
-cargo --version
-rustc --version
-```
-
-若报 `cargo metadata ... program not found`，说明当前终端找不到 Cargo，还未进入项目编译。`npm ci` 不会安装 Rust。可先检查默认安装位置：
-
-```powershell
-Test-Path "$env:USERPROFILE\.cargo\bin\cargo.exe"
-```
-
-若返回 `True`，可为当前 PowerShell 临时补充 PATH 后重试：
-
-```powershell
-$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-cargo --version
-```
-
-若仍无法识别，检查 Rust 安装器是否成功完成，以及是否自定义过 `CARGO_HOME`；不要通过重装 npm 依赖处理此错误。完整环境要求见 [Tauri 官方前置要求](https://v2.tauri.app/zh-cn/start/prerequisites/)。
-
-### 项目命令
-
-```sh
 npm ci
-npm run dev          # 前端
-npm run tauri dev    # Windows 桌面开发
+npm run tauri dev
+```
+
+仅开发前端时运行 `npm run dev`，然后访问 `http://127.0.0.1:1420/?preview=1` 查看示例数据。可追加 `role=sk`、`theme=dark`、`window=settings` 等查询参数预览不同状态；预览模式不会连接真实 Keeper 或写入注册表。
+
+### 测试与构建
+
+```powershell
 npm test
-cargo test -p keeper-core
-npm run test:ui      # CHROMIUM_PATH 可指定浏览器
+cargo test -p keeper-core --locked
+npm run test:ui
 npm run tauri build -- --target x86_64-pc-windows-msvc
 ```
 
-浏览器开发预览：`http://127.0.0.1:1420/?preview=1`，加 `role=sk` 预览受限角色；加 `theme=dark`、`state=empty|offline|long`、`window=settings` 检查界面状态。加 `standalone` 按独立窗口尺寸预览；`window=widget&standalone` 仅预览悬浮块。预览显式标注示例数据，不连接真实 Keeper，不写注册表。
+构建产物位于 `target/x86_64-pc-windows-msvc/release/` 及其 `bundle/nsis/` 子目录。
 
-Linux 交叉编译可使用 `bash scripts/build-linux.sh`，需要 Rust Windows MSVC target、LLVM、cargo-xwin 0.23+、NSIS。默认使用 clang 与预制 Windows sysroot，限制为单编译任务，并降低生成式 Windows 绑定库的优化级别，减少小内存机器的构建开销。GitHub Actions 使用 Windows runner 构建安装版与便携版。主分支构建成功后，发布流程按 package.json 版本创建 Release，标签指向实际构建提交；先上传完整附件再公开发布。PR 构建不发布。同一版本不覆盖不同源码的成品，修改程序后需升级版本号；可手动指定成功的主分支 build run ID 补发。
+## 开源协议
 
-见 [Windows 验收清单](WINDOWS-ACCEPTANCE.md)、[验证记录](VERIFICATION.md)、[设计说明](docs/DESIGN.md)。
+本项目采用与 [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper/blob/main/LICENSE) 相同的 **MIT License**。你可以自由使用、复制、修改、合并、发布和分发本项目，但须保留原始版权与许可声明；软件按“原样”提供，不附带任何明示或默示担保。

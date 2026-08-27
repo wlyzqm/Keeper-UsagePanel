@@ -29,9 +29,6 @@
         "displayLanguageSelector": false,
         "compression": "lzma"
       }
-    },
-    "resources": {
-      "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
     }
   }
 }

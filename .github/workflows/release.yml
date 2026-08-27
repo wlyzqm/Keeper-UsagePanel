@@ -72,7 +72,7 @@ jobs:
           无需 Rust、Cargo 或 .NET。升级前退出旧版，现有配置保留在当前用户注册表。
           首次启动填写 Keeper 地址，选择管理员密码或 API Key（sk）登录；设置支持 HTTP/SOCKS5 代理及字体。
           两路增量同时为 0 时暂留上一组结果，连续零用量达到 16 秒后归零。
-          程序未签名。原生窗口及真实 Keeper 连接请按 WINDOWS-ACCEPTANCE.md 验收。
+          程序未签名。使用方法和界面预览请查看项目 README。
 
           源码：{os.environ['BUILD_SHA']}
           构建：{os.environ['BUILD_URL']}
@@ -82,7 +82,7 @@ jobs:
                   z.writestr(zipfile.ZipInfo(name), data, compress_type=zipfile.ZIP_DEFLATED)
               add('KeeperUsagePanel.exe', (out / 'KeeperUsagePanel.exe').read_bytes())
               add('README.txt', readme)
-              for path in [Path('WINDOWS-ACCEPTANCE.md'), Path('THIRD-PARTY-NOTICES.md'), *sorted(Path('docs').glob('*'))]:
+              for path in [Path('README.md'), *sorted(Path('docs').glob('*'))]:
                   if path.is_file(): add(str(path), path.read_bytes())
           entries = []
           for path in sorted(out.iterdir()):
@@ -132,7 +132,7 @@ jobs:
               '',
               '- 修复 sk / 所选 Key 的五小时请求健康统计，避免误用 Activity 顶层约 24 小时总数。',
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
-              '- win-x64.zip：便携版、说明与验收清单；需已有 WebView2。',
+              '- win-x64.zip：便携版、使用说明与界面预览；需已有 WebView2。',
               '- KeeperUsagePanel.exe：独立便携程序。',
               '- SHA256SUMS.txt：上述文件校验值。',
               '',
