@@ -71,7 +71,7 @@ jobs:
           安装版：运行同版本 setup.exe；缺少 WebView2 时联网安装。
           无需 Rust、Cargo 或 .NET。升级前退出旧版，现有配置保留在当前用户注册表。
           首次启动填写 Keeper 地址，选择管理员密码或 API Key（sk）登录；设置支持 HTTP/SOCKS5 代理及字体。
-          非零输入/输出显示对应方向箭头；连续零用量达到设置的保留时间后归零（默认 16 秒）。
+          连接 Keeper 失败时会弹出可复制的脱敏 ERRLOG，用于排查代理、DNS、TLS 与超时问题。
           程序未签名。使用方法和界面预览请查看项目 README。
 
           源码：{os.environ['BUILD_SHA']}
@@ -130,8 +130,8 @@ jobs:
             const body = [
               `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
               '',
-              '- 输入、输出方向箭头根据对应增量独立显示，零值方向不再显示箭头。',
-              '- 非零数据保留时间可在设置中调整，默认 16 秒，支持 0–300 秒。',
+              '- Keeper 连接失败后弹出结构化 ERRLOG，展示连接阶段、代理路由、目标、错误分类与底层原因。',
+              '- ERRLOG 隐藏登录凭据及代理认证信息，可一键复制用于排查代理、DNS、TLS 与超时问题。',
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
               '- win-x64.zip：便携版、使用说明与界面预览；需已有 WebView2。',
               '- KeeperUsagePanel.exe：独立便携程序。',
