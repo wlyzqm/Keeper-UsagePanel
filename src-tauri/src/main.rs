@@ -38,6 +38,9 @@ async fn save_settings(
     if !(1..=60).contains(&value.poll_seconds) {
         return Err("刷新间隔需为 1–60 秒".into());
     }
+    if value.display_hold_seconds > 300 {
+        return Err("非零数据保留时间需为 0–300 秒".into());
+    }
     if !matches!(value.theme.as_str(), "light" | "dark") {
         value.theme = "light".into();
     }

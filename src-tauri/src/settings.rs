@@ -10,6 +10,7 @@ pub struct Settings {
     pub has_password: bool,
     pub remember_password: bool,
     pub poll_seconds: u32,
+    pub display_hold_seconds: u32,
     pub allow_private_http: bool,
     pub auto_start: bool,
     pub theme: String,
@@ -27,6 +28,7 @@ impl Default for Settings {
             has_password: false,
             remember_password: true,
             poll_seconds: 2,
+            display_hold_seconds: 16,
             allow_private_http: false,
             auto_start: false,
             theme: "light".into(),
@@ -35,6 +37,16 @@ impl Default for Settings {
             x: None,
             y: None,
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_settings_keep_the_default_display_hold() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.display_hold_seconds, 16);
     }
 }
 #[cfg(windows)]
@@ -113,6 +125,10 @@ mod platform {
             .get_value::<u32, _>("PollSeconds")
             .unwrap_or(2)
             .clamp(1, 60);
+        s.display_hold_seconds = k
+            .get_value::<u32, _>("DisplayHoldSeconds")
+            .unwrap_or(16)
+            .min(300);
         s.remember_password = k.get_value::<u32, _>("RememberPassword").unwrap_or(1) == 1;
         s.allow_private_http = k.get_value::<u32, _>("AllowPrivateHttp").unwrap_or(0) == 1;
         s.auto_start = k.get_value::<u32, _>("AutoStart").unwrap_or(0) == 1;
@@ -162,6 +178,7 @@ mod platform {
                 },
             )?;
             k.set_value("PollSeconds", &s.poll_seconds)?;
+            k.set_value("DisplayHoldSeconds", &s.display_hold_seconds)?;
             k.set_value("Theme", &s.theme)?;
             k.set_value("WidgetFont", &s.widget_font)?;
             if let Some(bytes) = proxy {

@@ -27,7 +27,7 @@ let api = {
 if (preview) api = (await import("./preview.js")).createPreview(search);
 const widgetDelta = new WidgetDeltaDisplay();
 const state = {
-  settings: { pollSeconds: 2, theme: "light" },
+  settings: { pollSeconds: 2, displayHoldSeconds: 16, theme: "light" },
   sample: null,
   access: null,
   revision: 0,
@@ -96,6 +96,10 @@ const applyAppearance = () => {
     widgetFontStack(state.settings.widgetFont),
   );
 };
+const applySettings = () => {
+  applyAppearance();
+  widgetDelta.setIdleSeconds(state.settings.displayHoldSeconds ?? 16);
+};
 const action = async (name) => {
   try {
     await api.call("window_action", { action: name });
@@ -134,7 +138,7 @@ const picker = (name, label, options, selected, extra = "") =>
   `<details class="picker ${extra}"><summary aria-label="${name === "key" ? "选择 Key owner" : name === "range" ? "更多日期范围" : name === "account" ? "选择认证账户" : "切换分布维度"}">${name === "key" ? icon("key") : ""}<span class="picker-label">${e(label)}</span>${icon("chevron")}</summary><div class="picker-menu">${options.map(([value, text]) => `<button data-pick="${name}" data-value="${e(value)}" class="${String(value) === String(selected) ? "selected" : ""}" title="${e(text)}">${e(text)}</button>`).join("")}</div></details>`;
 
 function widget() {
-  return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 用量，悬停或点击查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div></div></div>`;
+  return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 用量，悬停或点击查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row flow-zero" id="input-flow">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row flow-zero" id="output-flow">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div></div></div>`;
 }
 function panel() {
   return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div><div class="header-actions"><button class="console-button" data-console="usage" title="在默认浏览器打开配置的 Keeper 地址">用量控制台</button><button class="console-button" data-console="cpa" id="cpa-console" disabled title="连接后获取 CPA 地址">CPA 控制台</button><button class="settings-button" data-action="settings">设置</button></div>${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
@@ -586,6 +590,14 @@ function updateSample() {
     const delta = widgetDelta.update(s, !!state.error);
     $("#delta-input").textContent = compact(delta.input);
     $("#delta-output").textContent = compact(delta.output);
+    $("#input-flow").classList.toggle(
+      "flow-zero",
+      delta.input === null || delta.input === 0,
+    );
+    $("#output-flow").classList.toggle(
+      "flow-zero",
+      delta.output === null || delta.output === 0,
+    );
     $("#delta-input").title = number(delta.input);
     $("#delta-output").title = number(delta.output);
     // No native title tooltip over the compact widget; details have the full context.
@@ -634,7 +646,7 @@ async function openDetail() {
 function settings() {
   const s = state.settings;
   const sk = s.authMode === "api_key";
-  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper</div><span class="spacer"></span><span class="eyebrow">连接设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body"><label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><div class="preference-row"><label for="auth-mode">登录方式</label><select id="auth-mode" name="authMode"><option value="admin" ${sk ? "" : "selected"}>管理员密码</option><option value="api_key" ${sk ? "selected" : ""}>API Key（sk）</option></select></div><label class="field"><span id="credential-label">${sk ? "CPA API Key（sk）" : "管理员登录密码"}</span><input type="password" name="password" placeholder="${s.hasPassword ? "已保存凭据，留空继续使用" : sk ? "sk-…" : "Keeper 管理员密码"}" autocomplete="current-password" spellcheck="false"></label><p class="field-hint" id="auth-hint">${sk ? "仅可查看此 Key 的用量，不开放管理员指标。" : "可查看全部用量，或按 Key owner 筛选。"}</p><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住登录凭据 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row" id="clear-credential"><input type="checkbox" name="clearPassword">清除已保存凭据（无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details><hr class="setting-divider"><div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label>外观</label><div class="segments">${[
+  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper</div><span class="spacer"></span><span class="eyebrow">连接设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body"><label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><div class="preference-row"><label for="auth-mode">登录方式</label><select id="auth-mode" name="authMode"><option value="admin" ${sk ? "" : "selected"}>管理员密码</option><option value="api_key" ${sk ? "selected" : ""}>API Key（sk）</option></select></div><label class="field"><span id="credential-label">${sk ? "CPA API Key（sk）" : "管理员登录密码"}</span><input type="password" name="password" placeholder="${s.hasPassword ? "已保存凭据，留空继续使用" : sk ? "sk-…" : "Keeper 管理员密码"}" autocomplete="current-password" spellcheck="false"></label><p class="field-hint" id="auth-hint">${sk ? "仅可查看此 Key 的用量，不开放管理员指标。" : "可查看全部用量，或按 Key owner 筛选。"}</p><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住登录凭据 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row" id="clear-credential"><input type="checkbox" name="clearPassword">清除已保存凭据（无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details><hr class="setting-divider"><div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label for="display-hold-seconds">非零数据保留 <span class="muted">/ 秒</span></label><input id="display-hold-seconds" name="displayHoldSeconds" type="number" min="0" max="300" value="${s.displayHoldSeconds ?? 16}" required></div><p class="field-hint setting-hint">连续收到零用量达到此时长后归零；设为 0 即立即归零。</p><div class="preference-row"><label>外观</label><div class="segments">${[
     ["light", "浅色"],
     ["dark", "深色"],
   ]
@@ -794,6 +806,7 @@ document.addEventListener("submit", async (event) => {
         proxyUrl: form.get("proxyUrl"),
         widgetFont: form.get("widgetFont"),
         pollSeconds: Number(form.get("pollSeconds")),
+        displayHoldSeconds: Number(form.get("displayHoldSeconds")),
         rememberPassword: form.has("rememberPassword"),
         allowPrivateHttp: form.has("allowPrivateHttp"),
         autoStart: form.has("autoStart"),
@@ -935,7 +948,7 @@ await api.on("configured", async ({ settings: s, revision }) => {
   state.sample = null;
   state.error = "";
   state.keys = [];
-  applyAppearance();
+  applySettings();
   updateSample();
   if (windowName !== "settings") {
     if ($("#content")) $("#content").innerHTML = "";
@@ -952,7 +965,7 @@ await api.on("configured", async ({ settings: s, revision }) => {
 await api.on("settings-open", async () => {
   if (windowName === "settings") {
     state.settings = await api.call("get_settings");
-    applyAppearance();
+    applySettings();
     root.innerHTML = settings();
   }
 });
@@ -973,7 +986,7 @@ if (windowName !== "settings") {
 }
 try {
   state.settings = await api.call("get_settings");
-  applyAppearance();
+  applySettings();
   if (windowName === "settings") {
     if (preview) $(".preview-panel").innerHTML = settings();
     else root.innerHTML = settings();

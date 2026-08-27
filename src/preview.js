@@ -145,6 +145,7 @@ export function createPreview(search) {
           endpoint: "https://keeper.example/usage",
           authMode: viewer ? "api_key" : "admin",
           pollSeconds: 2,
+          displayHoldSeconds: 16,
           theme: search.get("theme") || "light",
           rememberPassword: true,
           hasPassword: false,

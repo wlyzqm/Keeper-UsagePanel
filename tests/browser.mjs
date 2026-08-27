@@ -152,6 +152,11 @@ try {
     await page.locator("[name=widgetFont]").inputValue(),
     "HarmonyOS Sans SC",
   );
+  assert.equal(
+    await page.locator("[name=displayHoldSeconds]").inputValue(),
+    "16",
+  );
+  await page.locator("[name=displayHoldSeconds]").fill("6");
   await page.locator("[name=widgetFont]").fill("Microsoft YaHei");
   await page.locator("[name=authMode]").selectOption("api_key");
   assert.equal(
@@ -179,6 +184,12 @@ try {
   assert.equal(
     await page.evaluate(() => window.__previewSavedSettings.value.authMode),
     "api_key",
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__previewSavedSettings.value.displayHoldSeconds,
+    ),
+    6,
   );
   await page.goto("http://127.0.0.1:1420/?preview=1&role=sk&theme=dark");
   await page.locator(".metric-value").first().waitFor();
@@ -343,19 +354,31 @@ try {
     }
     const detail = document.querySelector("#live-summary").textContent;
     const cleared = send(8);
+    const clearedDirections = [
+      getComputedStyle(document.querySelector("#input-flow svg")).visibility,
+      getComputedStyle(document.querySelector("#output-flow svg")).visibility,
+    ];
     send(9, 40, 0);
+    const oneDirection = [
+      getComputedStyle(document.querySelector("#input-flow svg")).visibility,
+      getComputedStyle(document.querySelector("#output-flow svg")).visibility,
+    ];
     send(10);
     window.__previewEmitError("测试断线");
     return {
       retained,
       detail,
       cleared,
+      clearedDirections,
+      oneDirection,
       offline: document.querySelector("#delta-input").textContent,
     };
   });
   assert.ok(held.retained.every((pair) => pair.join() === "12.5K,1.82K"));
   assert.ok(held.detail.includes("输入 0 · 输出 0"));
   assert.deepEqual(held.cleared, ["0", "0"]);
+  assert.deepEqual(held.clearedDirections, ["hidden", "hidden"]);
+  assert.deepEqual(held.oneDirection, ["visible", "hidden"]);
   assert.equal(held.offline, "—");
 
   // CSS pixel layout at common Windows scale factors; native multi-monitor behavior is a separate manual check.
@@ -431,7 +454,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings, native-size layout, contrast, numeric overflow, DPI rendering and 16-second display hold.",
+    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings, native-size layout, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
   );
 } finally {
   await browser?.close();

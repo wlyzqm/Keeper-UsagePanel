@@ -90,3 +90,18 @@ test("first zero sample displays zero; long polling intervals use elapsed second
     held: false,
   });
 });
+test("configured idle duration replaces the 16-second default", () => {
+  const display = new WidgetDeltaDisplay();
+  display.setIdleSeconds(6);
+  display.update(sample(0, 100, 0));
+  assert.deepEqual(display.update(sample(1)), {
+    input: 100,
+    output: 0,
+    held: true,
+  });
+  assert.deepEqual(display.update(sample(2, 0, 0, 4)), {
+    input: 0,
+    output: 0,
+    held: false,
+  });
+});

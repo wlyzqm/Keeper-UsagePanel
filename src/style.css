@@ -246,6 +246,9 @@ svg {
   height: 12px;
   color: var(--accent);
 }
+.flow-row.flow-zero svg {
+  visibility: hidden;
+}
 .flow-row span {
   font-size: 12px;
   font-weight: 600;
@@ -965,6 +968,9 @@ summary::-webkit-details-marker {
   border: 1px solid var(--line);
   border-radius: 4px;
   color: var(--ink);
+}
+.setting-hint {
+  text-align: right;
 }
 .proxy-settings {
   margin-top: 12px;

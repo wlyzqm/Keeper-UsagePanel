@@ -4,6 +4,9 @@ export class WidgetDeltaDisplay {
     this.idleSeconds = idleSeconds;
     this.clear();
   }
+  setIdleSeconds(idleSeconds) {
+    this.idleSeconds = idleSeconds;
+  }
   clear() {
     this.lastSample = null;
     this.zeroSeconds = 0;
