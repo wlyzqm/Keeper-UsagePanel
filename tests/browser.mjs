@@ -149,6 +149,12 @@ try {
   await page.locator(".proxy-settings summary").click();
   await page.locator("[name=proxyUrl]").fill("socks5h://127.0.0.1:1080");
   assert.equal(
+    await page.locator("[name=allowInvalidCertificates]").isChecked(),
+    false,
+  );
+  await page.locator("[name=allowInvalidCertificates]").check();
+  await page.screenshot({ path: ".cache/screenshots/tls-warning.png" });
+  assert.equal(
     await page.locator("[name=widgetFont]").inputValue(),
     "HarmonyOS Sans SC",
   );
@@ -184,6 +190,12 @@ try {
   assert.equal(
     await page.evaluate(() => window.__previewSavedSettings.value.authMode),
     "api_key",
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__previewSavedSettings.value.allowInvalidCertificates,
+    ),
+    true,
   );
   assert.equal(
     await page.evaluate(
@@ -479,7 +491,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings with connection ERRLOG, native-size layout, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
+    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings with connection ERRLOG and explicit TLS bypass, native-size layout, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
   );
 } finally {
   await browser?.close();

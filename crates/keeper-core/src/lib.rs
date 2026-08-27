@@ -177,6 +177,7 @@ pub struct Keeper {
     http: Client,
     base: Url,
     route: String,
+    verify_tls: bool,
     password: String,
     auth_mode: AuthMode,
     session: Mutex<Value>,
@@ -209,6 +210,16 @@ impl Keeper {
         proxy_url: &str,
         auth_mode: AuthMode,
     ) -> Result<Self, String> {
+        Self::connect_with_tls(endpoint, password, allow_http, proxy_url, auth_mode, false)
+    }
+    pub fn connect_with_tls(
+        endpoint: &str,
+        password: &str,
+        allow_http: bool,
+        proxy_url: &str,
+        auth_mode: AuthMode,
+        allow_invalid_certificates: bool,
+    ) -> Result<Self, String> {
         if auth_mode == AuthMode::ApiKey && password.trim().is_empty() {
             return Err("请输入 CPA API Key（sk）".into());
         }
@@ -217,6 +228,7 @@ impl Keeper {
             .no_proxy()
             .cookie_store(true)
             .redirect(reqwest::redirect::Policy::none())
+            .danger_accept_invalid_certs(allow_invalid_certificates)
             .timeout(std::time::Duration::from_secs(25));
         let route = if !proxy_url.trim().is_empty() {
             let proxy = Url::parse(proxy_url.trim())
@@ -252,6 +264,7 @@ impl Keeper {
             http,
             base,
             route,
+            verify_tls: !allow_invalid_certificates,
             password: password.into(),
             auth_mode,
             session: Mutex::new(Value::Null),
@@ -334,14 +347,15 @@ impl Keeper {
             .collect::<Vec<_>>()
             .join("\n");
         format!(
-            "{summary}\n\nERRLOG\ntime={}\nstage={stage}\nroute={}\ntarget={target}\n{classification}\n{detail}",
+            "{summary}\n\nERRLOG\ntime={}\nstage={stage}\nroute={}\ntarget={target}\ntls_verify={}\n{classification}\n{detail}",
             Utc::now().to_rfc3339(),
-            self.route
+            self.route,
+            if self.verify_tls { "enabled" } else { "disabled" }
         )
     }
     fn response_error(&self, summary: &str, stage: &str, status: u16) -> String {
         format!(
-            "{summary}\n\nERRLOG\ntime={}\nstage={stage}\nroute={}\ntarget={}://{}{}{}\nhttp_status={status}",
+            "{summary}\n\nERRLOG\ntime={}\nstage={stage}\nroute={}\ntarget={}://{}{}{}\ntls_verify={}\nhttp_status={status}",
             Utc::now().to_rfc3339(),
             self.route,
             self.base.scheme(),
@@ -350,7 +364,8 @@ impl Keeper {
                 .port()
                 .map(|port| format!(":{port}"))
                 .unwrap_or_default(),
-            self.base.path()
+            self.base.path(),
+            if self.verify_tls { "enabled" } else { "disabled" }
         )
     }
     pub async fn login(&self) -> Result<(), String> {

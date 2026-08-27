@@ -71,7 +71,7 @@ jobs:
           安装版：运行同版本 setup.exe；缺少 WebView2 时联网安装。
           无需 Rust、Cargo 或 .NET。升级前退出旧版，现有配置保留在当前用户注册表。
           首次启动填写 Keeper 地址，选择管理员密码或 API Key（sk）登录；设置支持 HTTP/SOCKS5 代理及字体。
-          连接 Keeper 失败时会弹出可复制的脱敏 ERRLOG，用于排查代理、DNS、TLS 与超时问题。
+          未知内网 CA 导致连接失败时，可显式关闭 HTTPS 证书验证；此选项默认关闭且仅应用于 Keeper 连接。
           程序未签名。使用方法和界面预览请查看项目 README。
 
           源码：{os.environ['BUILD_SHA']}
@@ -130,8 +130,8 @@ jobs:
             const body = [
               `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
               '',
-              '- Keeper 连接失败后弹出结构化 ERRLOG，展示连接阶段、代理路由、目标、错误分类与底层原因。',
-              '- ERRLOG 隐藏登录凭据及代理认证信息，可一键复制用于排查代理、DNS、TLS 与超时问题。',
+              '- 新增“忽略 HTTPS 证书验证”选项，解决受信任内网代理或自签名 CA 引起的 UnknownIssuer 连接失败。',
+              '- 此高风险选项默认关闭且仅应用于 Keeper 客户端；建议优先将内网 CA 安装到受信任证书链。',
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
               '- win-x64.zip：便携版、使用说明与界面预览；需已有 WebView2。',
               '- KeeperUsagePanel.exe：独立便携程序。',

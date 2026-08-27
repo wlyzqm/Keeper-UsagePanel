@@ -226,9 +226,28 @@ async fn connection_failure_returns_actionable_errlog_without_proxy_credentials(
     assert!(error.contains("ERRLOG\n"));
     assert!(error.contains("stage=login.request"));
     assert!(error.contains("route=proxy http://127.0.0.1:"));
+    assert!(error.contains("tls_verify=enabled"));
     assert!(error.contains("connect=true"));
     assert!(!error.contains("diagnostic-user"));
     assert!(!error.contains("diagnostic-secret"));
+}
+
+#[tokio::test]
+async fn connection_errlog_reports_when_tls_verification_is_disabled() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let client = Keeper::connect_with_tls(
+        "https://keeper.invalid/usage",
+        "",
+        false,
+        &format!("http://{addr}"),
+        AuthMode::Admin,
+        true,
+    )
+    .unwrap();
+    let error = client.login().await.unwrap_err();
+    assert!(error.contains("tls_verify=disabled"));
 }
 
 #[tokio::test]

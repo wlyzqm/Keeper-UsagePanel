@@ -63,12 +63,13 @@ async fn save_settings(
     }
     value.endpoint = value.endpoint.trim().trim_end_matches('/').to_string();
     value.has_password = !value.password.is_empty();
-    let client = Arc::new(Keeper::connect(
+    let client = Arc::new(Keeper::connect_with_tls(
         &value.endpoint,
         &value.password,
         value.allow_private_http,
         &value.proxy_url,
         value.auth_mode,
+        value.allow_invalid_certificates,
     )?);
     client.login().await?; // Verify before overwriting working credentials.
     settings::save(&value)?;
@@ -297,12 +298,13 @@ fn main() {
             let client = if config.endpoint.is_empty() {
                 None
             } else {
-                Keeper::connect(
+                Keeper::connect_with_tls(
                     &config.endpoint,
                     &config.password,
                     config.allow_private_http,
                     &config.proxy_url,
                     config.auth_mode,
+                    config.allow_invalid_certificates,
                 )
                 .ok()
                 .map(Arc::new)

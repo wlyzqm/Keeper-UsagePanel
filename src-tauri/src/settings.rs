@@ -12,6 +12,7 @@ pub struct Settings {
     pub poll_seconds: u32,
     pub display_hold_seconds: u32,
     pub allow_private_http: bool,
+    pub allow_invalid_certificates: bool,
     pub auto_start: bool,
     pub theme: String,
     pub proxy_url: String,
@@ -30,6 +31,7 @@ impl Default for Settings {
             poll_seconds: 2,
             display_hold_seconds: 16,
             allow_private_http: false,
+            allow_invalid_certificates: false,
             auto_start: false,
             theme: "light".into(),
             proxy_url: String::new(),
@@ -47,6 +49,7 @@ mod tests {
     fn older_settings_keep_the_default_display_hold() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.display_hold_seconds, 16);
+        assert!(!settings.allow_invalid_certificates);
     }
 }
 #[cfg(windows)]
@@ -131,6 +134,10 @@ mod platform {
             .min(300);
         s.remember_password = k.get_value::<u32, _>("RememberPassword").unwrap_or(1) == 1;
         s.allow_private_http = k.get_value::<u32, _>("AllowPrivateHttp").unwrap_or(0) == 1;
+        s.allow_invalid_certificates = k
+            .get_value::<u32, _>("AllowInvalidCertificates")
+            .unwrap_or(0)
+            == 1;
         s.auto_start = k.get_value::<u32, _>("AutoStart").unwrap_or(0) == 1;
         s.theme = k.get_value("Theme").unwrap_or("light".into());
         s.x = k.get_value::<u32, _>("X").ok().map(|v| v as i32);
@@ -194,6 +201,10 @@ mod platform {
             }
             k.set_value("RememberPassword", &(s.remember_password as u32))?;
             k.set_value("AllowPrivateHttp", &(s.allow_private_http as u32))?;
+            k.set_value(
+                "AllowInvalidCertificates",
+                &(s.allow_invalid_certificates as u32),
+            )?;
             k.set_value("AutoStart", &(s.auto_start as u32))?;
             if let Some(v) = s.x {
                 k.set_value("X", &(v as u32))?

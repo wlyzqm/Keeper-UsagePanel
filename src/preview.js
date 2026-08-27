@@ -152,6 +152,7 @@ export function createPreview(search) {
           hasPassword: false,
           autoStart: false,
           allowPrivateHttp: false,
+          allowInvalidCertificates: false,
         };
       if (command === "last_sample") return offline ? null : sample;
       if (command === "sample") {
