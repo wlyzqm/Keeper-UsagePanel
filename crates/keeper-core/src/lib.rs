@@ -514,8 +514,7 @@ impl Keeper {
                 p.push(("api_key_id".into(), api_key_id.into()));
             }
             let data = self.cached(activity_path, &p, 15).await?;
-            success = n(&data, "total_success");
-            failure = n(&data, "total_failure");
+            (success, failure) = activity_health(&data, Duration::hours(5))?;
         }
         while !scoped_health && page <= pages {
             let data = self

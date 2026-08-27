@@ -69,6 +69,26 @@ async fn server_as(
 fn activity(input: i64, output: i64) -> Value {
     json!({"timezone":"Asia/Shanghai","window_start":"2026-08-26T00:00:00+08:00","input_tokens":input,"output_tokens":output,"total_tokens":input+output})
 }
+fn request_health(success: i64, failure: i64) -> Value {
+    let window_end = chrono::Utc::now() + chrono::Duration::minutes(1);
+    json!({
+        "window_end":window_end,
+        "total_success":success,
+        "total_failure":failure+85,
+        "blocks":[
+            {
+                "start_time":window_end-chrono::Duration::hours(5)-chrono::Duration::seconds(1),
+                "success":0,
+                "failure":85
+            },
+            {
+                "start_time":window_end-chrono::Duration::minutes(5),
+                "success":success,
+                "failure":failure
+            }
+        ]
+    })
+}
 
 #[tokio::test]
 async fn direct_login_cookie_and_failed_poll_preserves_baseline() {
@@ -275,7 +295,7 @@ async fn sk_uses_only_own_endpoints_and_rejects_admin_views() {
         vec![
             (204, json!(null)),
             (200, activity(100, 30)),
-            (200, json!({"total_success":99,"total_failure":1})),
+            (200, request_health(99, 1)),
             (200, json!({"usage":{"total_tokens":130}})),
             (200, activity(100, 30)),
         ],
@@ -286,6 +306,7 @@ async fn sk_uses_only_own_endpoints_and_rejects_admin_views() {
     let sample = client.sample().await.unwrap();
     assert_eq!(sample["today_tokens"], 130);
     assert_eq!(sample["health"]["basis"], "key_requests");
+    assert_eq!(sample["health"]["failure"], 1);
     let summary = client.view("summary", Query::default()).await.unwrap();
     assert_eq!(summary["activity"]["output_tokens"], 30);
     for view in [
@@ -326,10 +347,10 @@ async fn key_switch_rebuilds_delta_and_scopes_health_without_account_data() {
     let (url, requests, task) = server(vec![
         (204, json!(null)),
         (200, activity(100, 30)),
-        (200, json!({"total_success":9,"total_failure":1})),
+        (200, request_health(9, 1)),
         (200, activity(125, 42)),
         (200, activity(900, 500)),
-        (200, json!({"total_success":1,"total_failure":9})),
+        (200, request_health(1, 9)),
         (200, activity(130, 45)),
     ])
     .await;
@@ -389,7 +410,7 @@ async fn sk_midnight_bridge_uses_own_activity_totals() {
         vec![
             (204, json!(null)),
             (200, activity(100, 40)),
-            (200, json!({"total_success":9,"total_failure":1})),
+            (200, request_health(9, 1)),
             (200, next_day),
             (200, activity(110, 50)),
         ],

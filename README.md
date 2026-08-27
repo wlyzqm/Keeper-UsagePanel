@@ -1,4 +1,4 @@
-# Keeper UsagePanel 0.4.2
+# Keeper UsagePanel 0.4.3
 
 面向 Windows 10 / 11 x64 的 Keeper 置顶悬浮球。Tauri 2 + Rust + HTML/CSS，直接连接既有 Keeper，不安装远程适配服务，不启动本地 HTTP 服务。
 
@@ -6,9 +6,9 @@
 
 ## 使用
 
-[Windows Release 下载入口](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。0.4.2 已完成 Windows 编译并公开发布，校验信息见 [验证记录](VERIFICATION.md)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件。
+[Windows Release 下载入口](https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest)。正式发布包含安装 EXE、独立便携 EXE、便携 ZIP 和 SHA256 校验文件；历史成品校验信息见 [验证记录](VERIFICATION.md)。
 
-推荐运行 `KeeperUsagePanel_0.4.2_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
+推荐运行 `KeeperUsagePanel_0.4.3_x64-setup.exe` 安装包。缺少 WebView2 时，安装器联网下载 Microsoft 运行时。已有 WebView2 的电脑也可直接运行便携版 `KeeperUsagePanel.exe`，不需要 .NET。
 
 升级前请先退出旧版。安装包和程序未做代码签名，可使用交付目录中的 `SHA256SUMS.txt` 核对文件。
 
@@ -61,7 +61,7 @@
 - 适配 Keeper 1.14.8 的 `/api/v1` 接口。Keeper 时区需为 `Asia/Shanghai`。Windows 的本地时区不影响北京时间口径。
 - 增量从相邻成功采样的今日累计值做差；失败不更新基线。跨午夜读取旧日期的 analysis 汇总（sk 使用 key-activity）接续，无法接续或计数倒退时重新建立基线。重启不回放历史增量。
 - 今日之外的详情使用 overview / analysis 的日期范围；缓存和推理属于子项，不重复计入 Token 总量。
-- 管理员全局健康聚合 Keeper 凭据健康五小时窗口；所选 Key / sk 模式改用该 Key 的近五小时请求成功与失败数，并复用 Keeper 的阈值公式。两者统计对象不同，详情明确标注。
+- 管理员全局健康聚合 Keeper 凭据健康五小时窗口；所选 Key / sk 模式从 Keeper Activity 分块中截取最近五小时请求成功与失败数，不使用 Activity 顶层约 24 小时总数，并复用 Keeper 的阈值公式。两者统计对象不同，详情明确标注。
 - 成本是 Keeper 价格配置的 API 等价估算，不等于订阅真实扣费；价格缺失显示 —。
 - 认证账户指标仅在管理员全部 Key 下显示：额度、额度历史与错误事件没有可靠的 Key 归属，不把共享数据标成某个 Key 的数据。账户概览是累计统计。只读配额缓存，不触发上游配额刷新。
 - 请求明细按日期、Key、账户筛选。错误接口不支持日期 / Key 查询，因此日期在当前游标页内筛选，明确显示本页条数；不能视为日期范围总数。

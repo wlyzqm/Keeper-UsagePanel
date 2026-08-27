@@ -130,7 +130,7 @@ jobs:
             const body = [
               `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
               '',
-              '- 新增 sk 受限登录、管理员 Key owner 同步悬浮块、悬停和点击双入口；修复可见状态与设置窗置顶问题。',
+              '- 修复 sk / 所选 Key 的五小时请求健康统计，避免误用 Activity 顶层约 24 小时总数。',
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
               '- win-x64.zip：便携版、说明与验收清单；需已有 WebView2。',
               '- KeeperUsagePanel.exe：独立便携程序。',

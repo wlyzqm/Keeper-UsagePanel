@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -41,6 +41,31 @@ pub fn totals(data: &Value) -> Totals {
         sum.reasoning_tokens += n(row, "reasoning_tokens");
     }
     sum
+}
+pub fn activity_health(data: &Value, window: Duration) -> Result<(i64, i64), String> {
+    if window <= Duration::zero() {
+        return Err("Keeper Activity 健康窗口异常".into());
+    }
+    let window_end = DateTime::parse_from_rfc3339(s(data, "window_end"))
+        .map_err(|_| "Keeper Activity 时间窗口异常")?
+        .with_timezone(&Utc);
+    let cutoff = window_end - window;
+    let blocks = data["blocks"]
+        .as_array()
+        .filter(|blocks| !blocks.is_empty())
+        .ok_or("Keeper Activity 分块缺失")?;
+    let mut success = 0;
+    let mut failure = 0;
+    for block in blocks {
+        let start = DateTime::parse_from_rfc3339(s(block, "start_time"))
+            .map_err(|_| "Keeper Activity 分块时间异常")?
+            .with_timezone(&Utc);
+        if start >= cutoff && start < window_end {
+            success += n(block, "success");
+            failure += n(block, "failure");
+        }
+    }
+    Ok((success, failure))
 }
 #[derive(Debug, Serialize)]
 pub struct Delta {
@@ -113,6 +138,7 @@ pub fn health(success: i64, failure: i64) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     fn reading(day: u32, input: i64, output: i64, seconds: i64) -> Reading {
         Reading {
             day: NaiveDate::from_ymd_opt(2026, 8, day).unwrap(),
@@ -169,5 +195,19 @@ mod tests {
         assert_eq!(health(9, 1), "健康");
         assert_eq!(health(90, 10), "波动");
         assert_eq!(health(99, 1), "健康");
+    }
+    #[test]
+    fn activity_health_excludes_blocks_older_than_five_hours() {
+        let data = json!({
+            "window_end":"2026-08-27T12:00:00Z",
+            "total_success":109,
+            "total_failure":88,
+            "blocks":[
+                {"start_time":"2026-08-27T06:59:59Z","success":100,"failure":85},
+                {"start_time":"2026-08-27T07:00:00Z","success":4,"failure":2},
+                {"start_time":"2026-08-27T11:56:00Z","success":5,"failure":1}
+            ]
+        });
+        assert_eq!(activity_health(&data, Duration::hours(5)).unwrap(), (9, 3));
     }
 }
