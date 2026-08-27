@@ -211,6 +211,27 @@ async fn http_proxy_is_used_for_keeper_login() {
 }
 
 #[tokio::test]
+async fn connection_failure_returns_actionable_errlog_without_proxy_credentials() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let client = Keeper::with_proxy(
+        "http://keeper.invalid/usage",
+        "",
+        true,
+        &format!("http://diagnostic-user:diagnostic-secret@{addr}"),
+    )
+    .unwrap();
+    let error = client.login().await.unwrap_err();
+    assert!(error.contains("ERRLOG\n"));
+    assert!(error.contains("stage=login.request"));
+    assert!(error.contains("route=proxy http://127.0.0.1:"));
+    assert!(error.contains("connect=true"));
+    assert!(!error.contains("diagnostic-user"));
+    assert!(!error.contains("diagnostic-secret"));
+}
+
+#[tokio::test]
 async fn socks5h_proxy_resolves_keeper_on_proxy() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

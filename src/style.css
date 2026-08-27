@@ -895,6 +895,9 @@ summary::-webkit-details-marker {
 .settings .panel-header {
   padding-bottom: 12px;
 }
+.settings {
+  position: relative;
+}
 .settings-form {
   display: flex;
   flex-direction: column;
@@ -1028,6 +1031,94 @@ summary::-webkit-details-marker {
 .registry-note svg {
   width: 12px;
   height: 12px;
+}
+.connection-error-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: color-mix(in srgb, var(--shell) 76%, transparent);
+  backdrop-filter: blur(4px);
+}
+.connection-error-dialog[hidden] {
+  display: none;
+}
+.connection-error-card {
+  width: 100%;
+  max-height: 100%;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--red);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 16px 40px #08172d38;
+}
+.error-dialog-kicker {
+  color: var(--red);
+  font-family: var(--numeric);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.connection-error-card h2 {
+  margin: 3px 0 5px;
+  font-size: 18px;
+}
+#connection-error-summary {
+  color: var(--muted);
+  line-height: 1.6;
+}
+#connection-errlog {
+  max-height: 220px;
+  margin: 14px 0 8px;
+  padding: 11px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--shell);
+  color: var(--ink);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  user-select: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.error-dialog-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+.error-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.error-dialog-actions button {
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  font-weight: 600;
+}
+.error-dialog-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.error-dialog-actions .copy-errlog {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+}
+.error-dialog-actions .copy-errlog:hover {
+  color: var(--paper);
+}
+.clipboard-field {
+  position: fixed;
+  left: -10000px;
 }
 
 /* Development previews use actual DIP dimensions, never transform scaling. */

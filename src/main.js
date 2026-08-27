@@ -109,6 +109,54 @@ const action = async (name) => {
     return false;
   }
 };
+const parseConnectionError = (error) => {
+  const raw =
+    typeof error === "string"
+      ? error
+      : error?.message || JSON.stringify(error) || "未知连接错误";
+  const marker = "\n\nERRLOG\n";
+  const split = raw.indexOf(marker);
+  return split < 0
+    ? {
+        message: raw.trim() || "无法连接 Keeper",
+        errlog: `stage=settings.connect\ndetail=${raw.trim() || "unknown error"}`,
+      }
+    : {
+        message: raw.slice(0, split).trim() || "无法连接 Keeper",
+        errlog: raw.slice(split + marker.length).trim(),
+      };
+};
+const showConnectionError = (error) => {
+  const diagnostic = parseConnectionError(error);
+  $("#settings-error").textContent = diagnostic.message;
+  $("#connection-error-summary").textContent = diagnostic.message;
+  $("#connection-errlog").textContent = diagnostic.errlog;
+  const dialog = $("#connection-error-dialog");
+  dialog.hidden = false;
+  dialog.querySelector('[data-error-action="copy"]')?.focus();
+};
+const closeConnectionError = () => {
+  const dialog = $("#connection-error-dialog");
+  if (!dialog) return;
+  dialog.hidden = true;
+  $("#save-settings")?.focus();
+};
+const copyConnectionErrlog = async (button) => {
+  const value = $("#connection-errlog")?.textContent || "";
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.className = "clipboard-field";
+    document.body.append(field);
+    field.select();
+    document.execCommand("copy");
+    field.remove();
+  }
+  button.textContent = "已复制 ERRLOG";
+};
 const button = (name, title) =>
   `<button class="icon-button" data-action="${name}" title="${title}" aria-label="${title}">${icon(name === "close-detail" || name === "close-settings" ? "close" : name)}</button>`;
 const note = (text) =>
@@ -656,7 +704,7 @@ function settings() {
     )
     .join(
       "",
-    )}</div></div><label class="field">悬浮球字体<input name="widgetFont" type="text" list="font-options" placeholder="HarmonyOS Sans SC" value="${e(s.widgetFont || "HarmonyOS Sans SC")}"></label><datalist id="font-options"><option value="HarmonyOS Sans SC"><option value="Microsoft YaHei UI"><option value="Microsoft YaHei"><option value="Segoe UI"><option value="Noto Sans SC"></datalist><p class="field-hint">未安装时自动回退：鸿蒙黑体 → 微软雅黑 → 系统无衬线字体。</p><label class="check-row"><input type="checkbox" name="autoStart" ${s.autoStart ? "checked" : ""}>登录 Windows 后启动</label></div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form></main></div>`;
+    )}</div></div><label class="field">悬浮球字体<input name="widgetFont" type="text" list="font-options" placeholder="HarmonyOS Sans SC" value="${e(s.widgetFont || "HarmonyOS Sans SC")}"></label><datalist id="font-options"><option value="HarmonyOS Sans SC"><option value="Microsoft YaHei UI"><option value="Microsoft YaHei"><option value="Segoe UI"><option value="Noto Sans SC"></datalist><p class="field-hint">未安装时自动回退：鸿蒙黑体 → 微软雅黑 → 系统无衬线字体。</p><label class="check-row"><input type="checkbox" name="autoStart" ${s.autoStart ? "checked" : ""}>登录 Windows 后启动</label></div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form><section class="connection-error-dialog" id="connection-error-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-error-title" aria-describedby="connection-error-summary" hidden><div class="connection-error-card"><div class="error-dialog-kicker">CONNECTION / ERRLOG</div><h2 id="connection-error-title">Keeper 连接失败</h2><p id="connection-error-summary"></p><pre id="connection-errlog" tabindex="0"></pre><p class="error-dialog-hint">日志已隐藏登录凭据与代理认证信息，可直接复制用于排查。</p><div class="error-dialog-actions"><button type="button" data-error-action="close">返回设置</button><button type="button" class="copy-errlog" data-error-action="copy">复制 ERRLOG</button></div></div></section></main></div>`;
 }
 
 root.innerHTML = preview
@@ -670,6 +718,14 @@ root.innerHTML = preview
 document.addEventListener("click", async (event) => {
   const b = event.target.closest("button");
   if (!b) return;
+  if (b.dataset.errorAction === "close") {
+    closeConnectionError();
+    return;
+  }
+  if (b.dataset.errorAction === "copy") {
+    await copyConnectionErrlog(b);
+    return;
+  }
   if (b.dataset.console) {
     b.disabled = true;
     try {
@@ -759,6 +815,10 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (!$("#connection-error-dialog")?.hidden) {
+      closeConnectionError();
+      return;
+    }
     const open = $("details[open]");
     if (open) {
       open.removeAttribute("open");
@@ -817,7 +877,7 @@ document.addEventListener("submit", async (event) => {
       ? "预览模式：未写入注册表。"
       : "";
   } catch (error) {
-    $("#settings-error").textContent = String(error);
+    showConnectionError(error);
   } finally {
     save.disabled = false;
     save.innerHTML = `保存并连接 ${icon("arrow")}`;

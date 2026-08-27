@@ -191,6 +191,31 @@ try {
     ),
     6,
   );
+  await page.evaluate(() => {
+    window.__previewSaveError =
+      "无法连接 Keeper，请检查地址、代理与网络\n\nERRLOG\ntime=2026-08-27T10:00:00+08:00\nstage=login.request\nroute=proxy socks5h://127.0.0.1:1080\ntarget=https://keeper.example/usage/api/v1/auth/login\ntimeout=false connect=true request=true status=none\ncause[0]=client error (Connect)";
+  });
+  await page.locator("#save-settings").click();
+  await page.getByRole("dialog", { name: "Keeper 连接失败" }).waitFor();
+  assert.ok(
+    (await page.locator("#connection-errlog").innerText()).includes(
+      "stage=login.request",
+    ),
+  );
+  assert.ok(
+    (await page.locator("#connection-errlog").innerText()).includes(
+      "connect=true",
+    ),
+  );
+  assert.equal(
+    await page
+      .locator("#connection-errlog")
+      .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    true,
+  );
+  await page.screenshot({ path: ".cache/screenshots/connection-errlog.png" });
+  await page.locator('[data-error-action="close"]').click();
+  assert.equal(await page.locator("#connection-error-dialog").isHidden(), true);
   await page.goto("http://127.0.0.1:1420/?preview=1&role=sk&theme=dark");
   await page.locator(".metric-value").first().waitFor();
   assert.deepEqual(
@@ -454,7 +479,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings, native-size layout, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
+    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings with connection ERRLOG, native-size layout, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
   );
 } finally {
   await browser?.close();

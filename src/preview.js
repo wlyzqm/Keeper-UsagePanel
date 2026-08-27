@@ -8,6 +8,7 @@ export function createPreview(search) {
     scope: { api_key_id: "", label: "全部 Key", revision: 0 },
   };
   window.__previewCalls = [];
+  window.__previewSaveError = "";
   window.__previewEvent = (name, value) => emit(name, value);
   const emit = (name, value) =>
     (listeners.get(name) || []).forEach((fn) => fn(value));
@@ -160,6 +161,7 @@ export function createPreview(search) {
         return sample;
       }
       if (command === "save_settings") {
+        if (window.__previewSaveError) throw window.__previewSaveError;
         window.__previewSavedSettings = args;
         return;
       }

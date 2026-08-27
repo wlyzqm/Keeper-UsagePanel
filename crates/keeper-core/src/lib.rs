@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    error::Error as StdError,
     sync::atomic::{AtomicBool, Ordering},
     time::Instant,
 };
@@ -175,6 +176,7 @@ pub enum AuthMode {
 pub struct Keeper {
     http: Client,
     base: Url,
+    route: String,
     password: String,
     auth_mode: AuthMode,
     session: Mutex<Value>,
@@ -216,7 +218,7 @@ impl Keeper {
             .cookie_store(true)
             .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(25));
-        if !proxy_url.trim().is_empty() {
+        let route = if !proxy_url.trim().is_empty() {
             let proxy = Url::parse(proxy_url.trim())
                 .map_err(|_| "代理地址无效，请包含 http:// 或 socks5://")?;
             if !matches!(proxy.scheme(), "http" | "https" | "socks5" | "socks5h")
@@ -229,13 +231,27 @@ impl Keeper {
                     "代理仅支持 HTTP / HTTPS / SOCKS5 / SOCKS5H 地址，不含路径或参数".into(),
                 );
             }
-            builder = builder
-                .proxy(reqwest::Proxy::all(proxy).map_err(|_| "无法创建代理，请检查地址与端口")?);
-        }
+            let route = format!(
+                "proxy {}://{}{}",
+                proxy.scheme(),
+                proxy.host_str().unwrap_or("unknown"),
+                proxy
+                    .port()
+                    .map(|port| format!(":{port}"))
+                    .unwrap_or_default()
+            );
+            builder = builder.proxy(
+                reqwest::Proxy::all(proxy).map_err(|_| "无法创建代理，请检查地址与端口")?,
+            );
+            route
+        } else {
+            "direct".into()
+        };
         let http = builder.build().map_err(|_| "无法创建连接")?;
         Ok(Self {
             http,
             base,
+            route,
             password: password.into(),
             auth_mode,
             session: Mutex::new(Value::Null),
@@ -259,6 +275,83 @@ impl Keeper {
             url.query_pairs_mut().extend_pairs(params);
         }
         Ok(url)
+    }
+    fn transport_error(
+        &self,
+        summary: &str,
+        stage: &str,
+        mut error: reqwest::Error,
+    ) -> String {
+        let target = error
+            .url()
+            .map(|url| {
+                format!(
+                    "{}://{}{}{}",
+                    url.scheme(),
+                    url.host_str().unwrap_or("unknown"),
+                    url.port()
+                        .map(|port| format!(":{port}"))
+                        .unwrap_or_default(),
+                    url.path()
+                )
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "{}://{}{}{}",
+                    self.base.scheme(),
+                    self.base.host_str().unwrap_or("unknown"),
+                    self.base
+                        .port()
+                        .map(|port| format!(":{port}"))
+                        .unwrap_or_default(),
+                    self.base.path()
+                )
+            });
+        let classification = format!(
+            "timeout={} connect={} request={} status={}",
+            error.is_timeout(),
+            error.is_connect(),
+            error.is_request(),
+            error
+                .status()
+                .map(|status| status.as_u16().to_string())
+                .unwrap_or_else(|| "none".into())
+        );
+        error = error.without_url();
+        let mut details = vec![error.to_string()];
+        let mut source = error.source();
+        while let Some(cause) = source {
+            let detail = cause.to_string();
+            if details.last() != Some(&detail) {
+                details.push(detail);
+            }
+            source = cause.source();
+        }
+        let detail = details
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| format!("cause[{index}]={value}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "{summary}\n\nERRLOG\ntime={}\nstage={stage}\nroute={}\ntarget={target}\n{classification}\n{detail}",
+            Utc::now().to_rfc3339(),
+            self.route
+        )
+    }
+    fn response_error(&self, summary: &str, stage: &str, status: u16) -> String {
+        format!(
+            "{summary}\n\nERRLOG\ntime={}\nstage={stage}\nroute={}\ntarget={}://{}{}{}\nhttp_status={status}",
+            Utc::now().to_rfc3339(),
+            self.route,
+            self.base.scheme(),
+            self.base.host_str().unwrap_or("unknown"),
+            self.base
+                .port()
+                .map(|port| format!(":{port}"))
+                .unwrap_or_default(),
+            self.base.path()
+        )
     }
     pub async fn login(&self) -> Result<(), String> {
         let _gate = self.login_gate.lock().await;
@@ -288,7 +381,13 @@ impl Keeper {
             .json(&body)
             .send()
             .await
-            .map_err(|_| "无法连接 Keeper，请检查地址与网络")?;
+            .map_err(|error| {
+                self.transport_error(
+                    "无法连接 Keeper，请检查地址、代理与网络",
+                    "login.request",
+                    error,
+                )
+            })?;
         match response.status().as_u16() {
             200 | 204 => {}
             401 | 403 => {
@@ -301,16 +400,28 @@ impl Keeper {
                     Some(Instant::now() + std::time::Duration::from_secs(60));
                 return Err("Keeper 登录过于频繁，请一分钟后重新连接".into());
             }
-            _ => return Err("Keeper 登录失败，请检查地址是否包含 /usage".into()),
+            status => {
+                return Err(self.response_error(
+                    "Keeper 登录失败，请检查地址是否包含 /usage",
+                    "login.response",
+                    status,
+                ))
+            }
         }
         let response = self
             .http
             .get(self.url("auth/session", &[])?)
             .send()
             .await
-            .map_err(|_| "无法确认 Keeper 登录权限")?;
+            .map_err(|error| {
+                self.transport_error("无法确认 Keeper 登录权限", "session.request", error)
+            })?;
         if !response.status().is_success() {
-            return Err("无法确认 Keeper 登录权限".into());
+            return Err(self.response_error(
+                "无法确认 Keeper 登录权限",
+                "session.response",
+                response.status().as_u16(),
+            ));
         }
         let session: Value = response.json().await.map_err(|_| "Keeper 会话信息无效")?;
         let expected = if self.is_viewer() {
@@ -391,7 +502,13 @@ impl Keeper {
             let response = request
                 .send()
                 .await
-                .map_err(|_| "连接超时或网络不可达，请检查 Keeper 地址")?;
+                .map_err(|error| {
+                    self.transport_error(
+                        "连接超时或网络不可达，请检查 Keeper 地址与代理",
+                        &format!("api.{path}"),
+                        error,
+                    )
+                })?;
             if let Some(guard) = rate_guard.as_mut() {
                 **guard = Some(Instant::now());
             }
