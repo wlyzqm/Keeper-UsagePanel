@@ -88,6 +88,64 @@ fn edge_is_exposed(
     })
 }
 
+fn dock_side(
+    window_left: i32,
+    window_right: i32,
+    area_left: i32,
+    area_right: i32,
+    threshold: i32,
+) -> Option<EdgeSide> {
+    let near_left = window_left <= area_left + threshold;
+    let near_right = window_right >= area_right - threshold;
+    match (near_left, near_right) {
+        (true, false) => Some(EdgeSide::Left),
+        (false, true) => Some(EdgeSide::Right),
+        (true, true) => {
+            if i64::from(window_left) + i64::from(window_right)
+                <= i64::from(area_left) + i64::from(area_right)
+            {
+                Some(EdgeSide::Left)
+            } else {
+                Some(EdgeSide::Right)
+            }
+        }
+        (false, false) => None,
+    }
+}
+
+fn point_inside(rect: DisplayRect, x: f64, y: f64, margin: f64) -> bool {
+    x >= rect.left as f64 + margin
+        && x <= rect.right as f64 - margin
+        && y >= rect.top as f64 + margin
+        && y <= rect.bottom as f64 - margin
+}
+
+fn dock_strip_contains(
+    dock: Dock,
+    top: i32,
+    bottom: i32,
+    scale: f64,
+    x: f64,
+    y: f64,
+) -> bool {
+    let width = (EDGE_WIDGET_WIDTH * scale).round() as i32;
+    let (left, right) = match dock.side {
+        EdgeSide::Left => (dock.boundary, dock.boundary + width),
+        EdgeSide::Right => (dock.boundary - width, dock.boundary),
+    };
+    point_inside(
+        DisplayRect {
+            left,
+            top,
+            right,
+            bottom,
+        },
+        x,
+        y,
+        0.,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +269,33 @@ mod tests {
             200,
             274
         ));
+    }
+
+    #[test]
+    fn a_window_thrown_past_either_edge_still_docks() {
+        assert_eq!(dock_side(-420, -204, 0, 1920, 32), Some(EdgeSide::Left));
+        assert_eq!(
+            dock_side(2200, 2416, 0, 1920, 32),
+            Some(EdgeSide::Right)
+        );
+        assert_eq!(dock_side(500, 716, 0, 1920, 32), None);
+    }
+
+    #[test]
+    fn an_expanded_dock_keeps_the_outermost_screen_pixel_hoverable() {
+        let expanded = DisplayRect {
+            left: 1704,
+            top: 200,
+            right: 1920,
+            bottom: 274,
+        };
+        let dock = Dock {
+            side: EdgeSide::Right,
+            boundary: 1920,
+            expanded: true,
+        };
+        assert!(!point_inside(expanded, 1919., 230., 8.));
+        assert!(dock_strip_contains(dock, 200, 274, 1., 1919., 230.));
     }
 }
 
@@ -545,15 +630,13 @@ fn dock_if_near(
     let area = work_area(widget);
     let scale = widget.scale_factor().unwrap_or(1.);
     let threshold = (threshold_dip * scale).round() as i32;
-    let left_distance = (position.x - area.0).abs();
-    let right_distance = (area.2 - (position.x + size.width as i32)).abs();
-    let side = if left_distance <= threshold && left_distance <= right_distance {
-        Some(EdgeSide::Left)
-    } else if right_distance <= threshold {
-        Some(EdgeSide::Right)
-    } else {
-        None
-    };
+    let side = dock_side(
+        position.x,
+        position.x + size.width as i32,
+        area.0,
+        area.2,
+        threshold,
+    );
     let max_x = (area.2 - size.width as i32).max(area.0);
     let max_y = (area.3 - size.height as i32).max(area.1);
     let y = position.y.clamp(area.1, max_y);
@@ -669,20 +752,33 @@ pub fn track(app: tauri::AppHandle) {
                 return false;
             };
             let m = margin * w.scale_factor().unwrap_or(1.);
-            cursor.x >= p.x as f64 + m
-                && cursor.x <= (p.x + s.width as i32) as f64 - m
-                && cursor.y >= p.y as f64 + m
-                && cursor.y <= (p.y + s.height as i32) as f64 - m
+            point_inside(
+                DisplayRect {
+                    left: p.x,
+                    top: p.y,
+                    right: p.x + s.width as i32,
+                    bottom: p.y + s.height as i32,
+                },
+                cursor.x,
+                cursor.y,
+                m,
+            )
         };
         let dock = state.hover.lock().unwrap().dock;
-        let in_ball = inside(
-            &widget,
-            if dock.is_some_and(|dock| !dock.expanded) {
-                0.
-            } else {
-                8.
-            },
-        );
+        let in_dock_strip = dock.is_some_and(|dock| {
+            let (Ok(position), Ok(size)) = (widget.outer_position(), widget.outer_size()) else {
+                return false;
+            };
+            dock_strip_contains(
+                dock,
+                position.y,
+                position.y + size.height as i32,
+                widget.scale_factor().unwrap_or(1.),
+                cursor.x,
+                cursor.y,
+            )
+        });
+        let in_ball = inside(&widget, 8.) || in_dock_strip;
         if dock.is_some_and(|dock| !dock.expanded) {
             let suppressed = state.hover.lock().unwrap().suppressed;
             if !in_ball {
