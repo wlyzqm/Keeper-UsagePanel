@@ -270,6 +270,7 @@ fn window_action(
         }
         "drag" => {
             if window.label() == "widget" {
+                windows::prepare_drag(&app, &window);
                 state.hover.lock().unwrap().dragging = true;
                 windows::hide_detail(&app);
                 if let Err(error) = window.start_dragging() {
@@ -284,6 +285,11 @@ fn window_action(
         _ => return Err("未知窗口操作".into()),
     }
     Ok(())
+}
+#[tauri::command]
+fn widget_edge_state(state: State<AppState>) -> windows::WidgetEdgeState {
+    let result = windows::edge_state(&state.hover.lock().unwrap());
+    result
 }
 fn main() {
     tauri::Builder::default()
@@ -334,7 +340,8 @@ fn main() {
             get_access,
             set_scope,
             open_console,
-            window_action
+            window_action,
+            widget_edge_state
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -489,9 +489,74 @@ try {
       await context.close();
     }
   }
+  for (const [side, theme] of [
+    ["left", "light"],
+    ["right", "dark"],
+  ]) {
+    const context = await browser.newContext({
+      viewport: { width: 34, height: 74 },
+    });
+    try {
+      const edgePage = await context.newPage();
+      await edgePage.goto(
+        `http://127.0.0.1:1420/?preview=1&window=widget&standalone&manual&edge=${side}&theme=${theme}`,
+      );
+      await edgePage.locator(".widget-wrap.edge-collapsed").waitFor();
+      await edgePage.waitForFunction(
+        () =>
+          document.querySelector("#edge-token-value")?.textContent === "295",
+      );
+      const layout = await edgePage.evaluate(() => {
+        const wrap = document.querySelector("#widget-wrap");
+        const widget = document.querySelector("#widget");
+        const value = document.querySelector("#edge-token-value");
+        const unit = document.querySelector("#edge-token-unit");
+        const health = document.querySelector("#edge-health .dot");
+        const rect = (element) => {
+          const box = element.getBoundingClientRect();
+          return {
+            left: box.left,
+            top: box.top,
+            right: box.right,
+            bottom: box.bottom,
+            width: box.width,
+            height: box.height,
+          };
+        };
+        return {
+          edge: wrap.dataset.edge,
+          wrap: rect(wrap),
+          widget: rect(widget),
+          value: rect(value),
+          unit: rect(unit),
+          health: rect(health),
+          valueFits: value.scrollWidth <= value.clientWidth + 1,
+          radius: getComputedStyle(widget).borderRadius,
+        };
+      });
+      assert.equal(layout.edge, side);
+      assert.equal(layout.wrap.width, 34);
+      assert.equal(layout.widget.width, 26);
+      assert.equal(layout.widget.height, 58);
+      assert.equal(layout.widget.left, side === "left" ? 0 : 8);
+      assert.ok(layout.health.bottom <= layout.value.top);
+      assert.ok(layout.value.bottom <= layout.unit.top + 1);
+      assert.ok(layout.valueFits);
+      assert.equal(await edgePage.locator("#edge-token-unit").innerText(), "M");
+      assert.equal(
+        await edgePage.locator("#edge-health").getAttribute("class"),
+        "peek-health green",
+      );
+      await edgePage.screenshot({
+        path: `.cache/screenshots/widget-edge-${side}-${theme}.png`,
+      });
+    } finally {
+      await context.close();
+    }
+  }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings with connection ERRLOG and explicit TLS bypass, native-size layout, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
+    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings with connection ERRLOG and explicit TLS bypass, native-size and docked-edge layouts, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
   );
 } finally {
   await browser?.close();

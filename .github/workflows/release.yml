@@ -130,8 +130,9 @@ jobs:
             const body = [
               `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
               '',
-              '- 新增“忽略 HTTPS 证书验证”选项，解决受信任内网代理或自签名 CA 引起的 UnknownIssuer 连接失败。',
-              '- 此高风险选项默认关闭且仅应用于 Keeper 客户端；建议优先将内网 CA 安装到受信任证书链。',
+              '- 新增悬浮球屏幕左右外沿吸附收起，悬停后向屏幕内侧恢复完整悬浮球。',
+              '- 多屏衔接位置不会收起，可直接跨屏拖动；错位显示器按实际衔接区间判断。',
+              '- 收起态保留健康状态灯及紧凑 Token 总量，并适配明暗主题与高 DPI。',
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
               '- win-x64.zip：便携版、使用说明与界面预览；需已有 WebView2。',
               '- KeeperUsagePanel.exe：独立便携程序。',

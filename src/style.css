@@ -206,6 +206,9 @@ svg {
   width: 8px;
   height: 8px;
 }
+.widget-peek {
+  display: none;
+}
 .widget-total {
   min-width: 0;
   display: flex;
@@ -266,6 +269,91 @@ svg {
 .widget.offline .widget-number,
 .widget.offline .flow-row strong {
   color: var(--muted);
+}
+.widget.offline .peek-total {
+  color: var(--muted);
+}
+.widget-wrap.edge-collapsed {
+  width: 34px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.widget-wrap.edge-collapsed[data-edge="left"] {
+  padding-right: 8px;
+  padding-left: 0;
+}
+.widget-wrap.edge-collapsed[data-edge="right"] {
+  padding-right: 0;
+  padding-left: 8px;
+}
+.widget-wrap.edge-collapsed .widget {
+  display: block;
+  width: 26px;
+  height: 58px;
+  padding: 5px 2px 4px;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--line) 78%, var(--accent));
+  cursor: default;
+}
+.widget-wrap.edge-collapsed[data-edge="left"] .widget {
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 2px 3px 8px #12284026;
+}
+.widget-wrap.edge-collapsed[data-edge="right"] .widget {
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -2px 3px 8px #12284026;
+}
+.widget-wrap.edge-collapsed .widget-health,
+.widget-wrap.edge-collapsed .widget-total,
+.widget-wrap.edge-collapsed .widget-flows {
+  display: none;
+}
+.widget-wrap.edge-collapsed .widget-peek {
+  display: grid;
+  grid-template-rows: 18px 1fr;
+  place-items: center;
+  width: 20px;
+  height: 48px;
+  margin: 0 auto;
+}
+.peek-health {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.peek-health .dot {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+.peek-total {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  line-height: 1;
+}
+.peek-total strong {
+  max-width: 21px;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+.peek-total span {
+  min-height: 9px;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
 }
 .widget-menu {
   position: absolute;

@@ -7,6 +7,7 @@ import {
   escape as e,
   number,
   compact,
+  edgeCompact,
   percent,
   duration,
   money,
@@ -186,7 +187,16 @@ const picker = (name, label, options, selected, extra = "") =>
   `<details class="picker ${extra}"><summary aria-label="${name === "key" ? "选择 Key owner" : name === "range" ? "更多日期范围" : name === "account" ? "选择认证账户" : "切换分布维度"}">${name === "key" ? icon("key") : ""}<span class="picker-label">${e(label)}</span>${icon("chevron")}</summary><div class="picker-menu">${options.map(([value, text]) => `<button data-pick="${name}" data-value="${e(value)}" class="${String(value) === String(selected) ? "selected" : ""}" title="${e(text)}">${e(text)}</button>`).join("")}</div></details>`;
 
 function widget() {
-  return `<div class="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 用量，悬停或点击查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row flow-zero" id="input-flow">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row flow-zero" id="output-flow">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div></div></div>`;
+  return `<div class="widget-wrap" id="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 用量，悬停或点击查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row flow-zero" id="input-flow">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row flow-zero" id="output-flow">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div><div class="widget-peek" aria-hidden="true"><span class="peek-health neutral" id="edge-health"><i class="dot"></i></span><span class="peek-total num"><strong id="edge-token-value">—</strong><span id="edge-token-unit"></span></span></div></div></div>`;
+}
+
+function applyWidgetEdge(next = {}) {
+  const wrap = $("#widget-wrap");
+  if (!wrap) return;
+  const side = next.side === "left" || next.side === "right" ? next.side : "";
+  wrap.classList.toggle("edge-collapsed", !!side && next.collapsed === true);
+  if (side) wrap.dataset.edge = side;
+  else delete wrap.dataset.edge;
 }
 function panel() {
   return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div><div class="header-actions"><button class="console-button" data-console="usage" title="在默认浏览器打开配置的 Keeper 地址">用量控制台</button><button class="console-button" data-console="cpa" id="cpa-console" disabled title="连接后获取 CPA 地址">CPA 控制台</button><button class="settings-button" data-action="settings">设置</button></div>${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
@@ -635,6 +645,10 @@ function updateSample() {
     $("#health").className = `widget-health ${tone(health)}`;
     $("#health").setAttribute("aria-label", health);
     $("#health").title = health;
+    $("#edge-health").className = `peek-health ${tone(health)}`;
+    const edgeTotal = edgeCompact(s?.today_tokens);
+    $("#edge-token-value").textContent = edgeTotal.value;
+    $("#edge-token-unit").textContent = edgeTotal.unit;
     const delta = widgetDelta.update(s, !!state.error);
     $("#delta-input").textContent = compact(delta.input);
     $("#delta-output").textContent = compact(delta.output);
@@ -652,7 +666,7 @@ function updateSample() {
     $("#widget").removeAttribute("title");
     $("#widget").setAttribute(
       "aria-label",
-      `Keeper ${scopeLabel()}用量，悬停或点击查看详情，拖动移动`,
+      `Keeper ${scopeLabel()}今日用量 ${s ? number(s.today_tokens) : "—"} Token，${health}，悬停或点击查看详情，拖动移动`,
     );
   }
   if ($("#connection")) {
@@ -1044,6 +1058,14 @@ if (windowName !== "settings") {
     state.generation++;
     state.loading = false;
   });
+}
+if ($("#widget")) {
+  await api.on("widget-edge", applyWidgetEdge);
+  try {
+    applyWidgetEdge(await api.call("widget_edge_state"));
+  } catch (error) {
+    console.error(error);
+  }
 }
 try {
   state.settings = await api.call("get_settings");

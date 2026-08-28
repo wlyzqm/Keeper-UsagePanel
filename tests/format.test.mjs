@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   compact,
+  edgeCompact,
   number,
   percent,
   duration,
@@ -41,4 +42,12 @@ test("widget defaults to HarmonyOS and preserves Chinese fallbacks", () => {
     ),
   );
   assert.ok(widgetFontStack().includes('"Microsoft YaHei"'));
+});
+
+test("edge compact total stays within three glyphs and separates magnitude", () => {
+  assert.deepEqual(edgeCompact(null), { value: "—", unit: "" });
+  assert.deepEqual(edgeCompact(842), { value: "842", unit: "" });
+  assert.deepEqual(edgeCompact(1234567), { value: "1.2", unit: "M" });
+  assert.deepEqual(edgeCompact(295139623), { value: "295", unit: "M" });
+  assert.deepEqual(edgeCompact(999900), { value: "1", unit: "M" });
 });

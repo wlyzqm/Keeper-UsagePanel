@@ -117,6 +117,12 @@ export function createPreview(search) {
     call: async (command, args = {}) => {
       window.__previewCalls.push({ command, args });
       if (command === "open_console") return;
+      if (command === "widget_edge_state") {
+        const side = ["left", "right"].includes(search.get("edge"))
+          ? search.get("edge")
+          : null;
+        return { side, collapsed: !!side && search.get("expanded") !== "1" };
+      }
       if (command === "get_access") return structuredClone(access);
       if (command === "set_scope") {
         if (viewer) throw "sk 登录不能切换 Key owner";

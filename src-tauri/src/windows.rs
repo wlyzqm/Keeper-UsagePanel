@@ -1,12 +1,38 @@
 use crate::AppState;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+
+const WIDGET_WIDTH: f64 = 216.;
+const WIDGET_HEIGHT: f64 = 74.;
+const EDGE_WIDGET_WIDTH: f64 = 34.;
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeSide {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Dock {
+    side: EdgeSide,
+    boundary: i32,
+    expanded: bool,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct WidgetEdgeState {
+    side: Option<EdgeSide>,
+    collapsed: bool,
+}
+
 #[derive(Default)]
 pub struct Hover {
     pub dragging: bool,
     pub suppressed: bool,
     entered: Option<Instant>,
     left: Option<Instant>,
+    dock: Option<Dock>,
 }
 
 impl Hover {
@@ -29,6 +55,39 @@ impl Hover {
         }
     }
 }
+
+pub fn edge_state(hover: &Hover) -> WidgetEdgeState {
+    WidgetEdgeState {
+        side: hover.dock.map(|dock| dock.side),
+        collapsed: hover.dock.is_some_and(|dock| !dock.expanded),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DisplayRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+fn edge_is_exposed(
+    displays: &[DisplayRect],
+    side: EdgeSide,
+    boundary: i32,
+    top: i32,
+    bottom: i32,
+) -> bool {
+    !displays.iter().any(|display| {
+        let vertical_overlap = display.top < bottom && display.bottom > top;
+        let reaches_across = match side {
+            EdgeSide::Left => display.left < boundary && display.right >= boundary - 2,
+            EdgeSide::Right => display.right > boundary && display.left <= boundary + 2,
+        };
+        vertical_overlap && reaches_across
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,11 +120,103 @@ mod tests {
             (true, false)
         );
     }
+
+    #[test]
+    fn only_exterior_horizontal_edges_can_collapse() {
+        let primary = DisplayRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        assert!(edge_is_exposed(
+            &[primary],
+            EdgeSide::Left,
+            0,
+            200,
+            274
+        ));
+        assert!(edge_is_exposed(
+            &[primary],
+            EdgeSide::Right,
+            1920,
+            200,
+            274
+        ));
+
+        let right = DisplayRect {
+            left: 1920,
+            top: 0,
+            right: 3840,
+            bottom: 1080,
+        };
+        assert!(!edge_is_exposed(
+            &[primary, right],
+            EdgeSide::Right,
+            1920,
+            200,
+            274
+        ));
+        assert!(!edge_is_exposed(
+            &[primary, right],
+            EdgeSide::Left,
+            1920,
+            200,
+            274
+        ));
+    }
+
+    #[test]
+    fn staggered_monitors_only_block_collapse_where_they_join() {
+        let primary = DisplayRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let lower_right = DisplayRect {
+            left: 1920,
+            top: 500,
+            right: 3840,
+            bottom: 1580,
+        };
+        assert!(edge_is_exposed(
+            &[primary, lower_right],
+            EdgeSide::Right,
+            1920,
+            200,
+            274
+        ));
+        assert!(!edge_is_exposed(
+            &[primary, lower_right],
+            EdgeSide::Right,
+            1920,
+            700,
+            774
+        ));
+    }
+
+    #[test]
+    fn a_vertical_taskbar_is_not_treated_as_the_physical_screen_edge() {
+        let display = DisplayRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        assert!(!edge_is_exposed(
+            &[display],
+            EdgeSide::Left,
+            48,
+            200,
+            274
+        ));
+    }
 }
 
 pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     for (label, w, h) in [
-        ("widget", 216., 74.),
+        ("widget", WIDGET_WIDTH, WIDGET_HEIGHT),
         ("detail", 640., 640.),
         ("settings", 488., 640.),
     ] {
@@ -88,6 +239,7 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     }
     let widget = app.get_webview_window("widget").unwrap();
     let config = app.state::<AppState>().settings.lock().unwrap().clone();
+    let restore_edge = config.x.is_some();
     if let (Some(x), Some(y)) = (config.x, config.y) {
         let _ = widget.set_position(PhysicalPosition::new(x, y));
     }
@@ -102,6 +254,10 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         .unwrap_or(area.1 + 180)
         .clamp(area.1, (area.3 - size.height as i32).max(area.1));
     widget.set_position(PhysicalPosition::new(x, y))?;
+    // Restore an old snapped position; a first-run default remains expanded.
+    if restore_edge {
+        dock_if_near(app, &widget, 12.);
+    }
     use tauri::menu::{Menu, MenuItem};
     let show = MenuItem::with_id(app, "show", "显示悬浮球", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "settings", "连接设置", true, None::<&str>)?;
@@ -215,6 +371,7 @@ pub fn show_detail(app: &tauri::AppHandle) {
     ) else {
         return;
     };
+    expand_docked(app, &widget);
     if visible(&panel) {
         return;
     }
@@ -270,6 +427,194 @@ fn work_area(window: &tauri::WebviewWindow) -> (i32, i32, i32, i32) {
         (0, 0, 1920, 1080)
     }
 }
+
+fn display_rects(window: &tauri::WebviewWindow) -> Vec<DisplayRect> {
+    window
+        .available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            DisplayRect {
+                left: position.x,
+                top: position.y,
+                right: position.x + size.width as i32,
+                bottom: position.y + size.height as i32,
+            }
+        })
+        .collect()
+}
+
+fn emit_edge(window: &tauri::WebviewWindow, state: WidgetEdgeState) {
+    let _ = window.emit("widget-edge", state);
+}
+
+fn collapse_docked(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
+    let state = app.state::<AppState>();
+    let Some(dock) = state.hover.lock().unwrap().dock else {
+        return;
+    };
+    if !dock.expanded {
+        return;
+    }
+    let Ok(position) = widget.outer_position() else {
+        return;
+    };
+    let scale = widget.scale_factor().unwrap_or(1.);
+    let collapsed_width = (EDGE_WIDGET_WIDTH * scale).round() as i32;
+    let x = match dock.side {
+        EdgeSide::Left => dock.boundary,
+        EdgeSide::Right => dock.boundary - collapsed_width,
+    };
+    if widget
+        .set_size(LogicalSize::new(EDGE_WIDGET_WIDTH, WIDGET_HEIGHT))
+        .is_err()
+    {
+        return;
+    }
+    let _ = widget.set_position(PhysicalPosition::new(x, position.y));
+    let next = {
+        let mut hover = state.hover.lock().unwrap();
+        if let Some(current) = hover.dock.as_mut() {
+            current.expanded = false;
+        }
+        edge_state(&hover)
+    };
+    emit_edge(widget, next);
+}
+
+fn expand_docked(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
+    let state = app.state::<AppState>();
+    let Some(dock) = state.hover.lock().unwrap().dock else {
+        return;
+    };
+    if dock.expanded {
+        return;
+    }
+    let Ok(position) = widget.outer_position() else {
+        return;
+    };
+    let scale = widget.scale_factor().unwrap_or(1.);
+    let full_width = (WIDGET_WIDTH * scale).round() as i32;
+    let x = match dock.side {
+        EdgeSide::Left => dock.boundary,
+        EdgeSide::Right => dock.boundary - full_width,
+    };
+    if widget
+        .set_size(LogicalSize::new(WIDGET_WIDTH, WIDGET_HEIGHT))
+        .is_err()
+    {
+        return;
+    }
+    let _ = widget.set_position(PhysicalPosition::new(x, position.y));
+    let next = {
+        let mut hover = state.hover.lock().unwrap();
+        if let Some(current) = hover.dock.as_mut() {
+            current.expanded = true;
+        }
+        hover.entered = None;
+        edge_state(&hover)
+    };
+    emit_edge(widget, next);
+}
+
+pub fn prepare_drag(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
+    expand_docked(app, widget);
+    let state = app.state::<AppState>();
+    let changed = {
+        let mut hover = state.hover.lock().unwrap();
+        let changed = hover.dock.take().is_some();
+        hover.entered = None;
+        hover.left = None;
+        changed
+    };
+    if changed {
+        emit_edge(widget, edge_state(&state.hover.lock().unwrap()));
+    }
+}
+
+fn dock_if_near(
+    app: &tauri::AppHandle,
+    widget: &tauri::WebviewWindow,
+    threshold_dip: f64,
+) -> bool {
+    let (Ok(position), Ok(size)) = (widget.outer_position(), widget.outer_size()) else {
+        return false;
+    };
+    let area = work_area(widget);
+    let scale = widget.scale_factor().unwrap_or(1.);
+    let threshold = (threshold_dip * scale).round() as i32;
+    let left_distance = (position.x - area.0).abs();
+    let right_distance = (area.2 - (position.x + size.width as i32)).abs();
+    let side = if left_distance <= threshold && left_distance <= right_distance {
+        Some(EdgeSide::Left)
+    } else if right_distance <= threshold {
+        Some(EdgeSide::Right)
+    } else {
+        None
+    };
+    let max_x = (area.2 - size.width as i32).max(area.0);
+    let max_y = (area.3 - size.height as i32).max(area.1);
+    let y = position.y.clamp(area.1, max_y);
+    let displays = display_rects(widget);
+    if let Some(side) = side {
+        let boundary = match side {
+            EdgeSide::Left => area.0,
+            EdgeSide::Right => area.2,
+        };
+        // An unavailable monitor list must never turn a multi-screen seam into a dock target.
+        if !displays.is_empty()
+            && edge_is_exposed(
+                &displays,
+                side,
+                boundary,
+                y,
+                y + size.height as i32,
+            )
+        {
+            let full_width = (WIDGET_WIDTH * scale).round() as i32;
+            let x = match side {
+                EdgeSide::Left => boundary,
+                EdgeSide::Right => boundary - full_width,
+            };
+            let _ = widget.set_position(PhysicalPosition::new(x, y));
+            app.state::<AppState>().hover.lock().unwrap().dock = Some(Dock {
+                side,
+                boundary,
+                expanded: true,
+            });
+            collapse_docked(app, widget);
+            return true;
+        }
+    }
+    let x = position.x.clamp(area.0, max_x);
+    let _ = widget.set_position(PhysicalPosition::new(x, y));
+    false
+}
+
+fn persist_widget_position(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
+    let Ok(position) = widget.outer_position() else {
+        return;
+    };
+    let scale = widget.scale_factor().unwrap_or(1.);
+    let dock = app.state::<AppState>().hover.lock().unwrap().dock;
+    let x = dock.map_or(position.x, |dock| match dock.side {
+        EdgeSide::Left => dock.boundary,
+        EdgeSide::Right => dock.boundary - (WIDGET_WIDTH * scale).round() as i32,
+    });
+    crate::settings::position(x, position.y);
+    let state = app.state::<AppState>();
+    let mut config = state.settings.lock().unwrap();
+    config.x = Some(x);
+    config.y = Some(position.y);
+}
+
+fn finish_drag(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
+    dock_if_near(app, widget, 32.);
+    persist_widget_position(app, widget);
+}
+
 pub fn session_locked() -> bool {
     #[cfg(windows)]
     unsafe {
@@ -314,25 +659,7 @@ pub fn track(app: tauri::AppHandle) {
                 hover.entered = None;
             }
             let _ = widget.emit("drag-finished", ());
-            if let (Ok(p), Ok(size)) = (widget.outer_position(), widget.outer_size()) {
-                let area = work_area(&widget);
-                let scale = widget.scale_factor().unwrap_or(1.);
-                let gap = (8. * scale) as i32;
-                let max_x = (area.2 - size.width as i32).max(area.0);
-                let max_y = (area.3 - size.height as i32).max(area.1);
-                let mut x = p.x.clamp(area.0, max_x);
-                let y = p.y.clamp(area.1, max_y);
-                if x - area.0 < 32 {
-                    x = area.0 + gap;
-                } else if max_x - x < 32 {
-                    x = max_x - gap;
-                }
-                let _ = widget.set_position(PhysicalPosition::new(x, y));
-                crate::settings::position(x, y);
-                let mut config = state.settings.lock().unwrap();
-                config.x = Some(x);
-                config.y = Some(y);
-            }
+            finish_drag(&app, &widget);
         }
         let inside = |w: &tauri::WebviewWindow, margin: f64| -> bool {
             if !visible(&w) {
@@ -347,7 +674,24 @@ pub fn track(app: tauri::AppHandle) {
                 && cursor.y >= p.y as f64 + m
                 && cursor.y <= (p.y + s.height as i32) as f64 - m
         };
-        let in_ball = inside(&widget, 8.);
+        let dock = state.hover.lock().unwrap().dock;
+        let in_ball = inside(
+            &widget,
+            if dock.is_some_and(|dock| !dock.expanded) {
+                0.
+            } else {
+                8.
+            },
+        );
+        if dock.is_some_and(|dock| !dock.expanded) {
+            let suppressed = state.hover.lock().unwrap().suppressed;
+            if !in_ball {
+                state.hover.lock().unwrap().suppressed = false;
+            } else if !suppressed {
+                expand_docked(&app, &widget);
+            }
+            continue;
+        }
         let panel = app.get_webview_window("detail");
         let in_panel = panel.as_ref().is_some_and(|w| inside(w, 8.));
         let bridge = panel.as_ref().is_some_and(|w| {
@@ -389,6 +733,7 @@ pub fn track(app: tauri::AppHandle) {
             show_detail(&app);
         } else if hide {
             hide_detail(&app);
+            collapse_docked(&app, &widget);
         }
     });
 }
