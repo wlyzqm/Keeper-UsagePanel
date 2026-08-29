@@ -337,7 +337,7 @@ try {
   await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
   await page.locator('[data-settings-tab="updates"]').click();
   assert.ok(
-    (await page.locator("#update-center").innerText()).includes("0.5.2"),
+    (await page.locator("#update-center").innerText()).includes("0.5.3"),
   );
   await page.screenshot({ path: ".cache/screenshots/settings-updates.png" });
   await page.locator('[data-action="check-update"]').click();
@@ -939,6 +939,34 @@ try {
       await edgePage.screenshot({
         path: `.cache/screenshots/widget-edge-${side}-${theme}.png`,
       });
+    } finally {
+      await context.close();
+    }
+  }
+  {
+    const context = await browser.newContext({
+      viewport: { width: 34, height: 74 },
+    });
+    try {
+      const startupPage = await context.newPage();
+      await startupPage.goto(
+        "http://127.0.0.1:1420/?preview=1&window=widget&standalone&manual&edge=right&edgeDelay=500",
+        { waitUntil: "commit" },
+      );
+      const startupWidget = startupPage.locator("#widget-wrap");
+      await startupWidget.waitFor({ state: "attached" });
+      assert.equal(
+        await startupWidget.evaluate((el) => getComputedStyle(el).visibility),
+        "hidden",
+        "Widget must stay unpainted while the native collapsed state is loading",
+      );
+      await startupPage
+        .locator(".widget-wrap.widget-layout-ready.edge-collapsed")
+        .waitFor();
+      assert.equal(
+        await startupWidget.evaluate((el) => getComputedStyle(el).visibility),
+        "visible",
+      );
     } finally {
       await context.close();
     }

@@ -145,6 +145,12 @@ export function createPreview(search) {
       window.__previewCalls.push({ command, args });
       if (command === "open_console") return;
       if (command === "widget_edge_state") {
+        const edgeDelay = Math.min(
+          1000,
+          Math.max(0, Number(search.get("edgeDelay")) || 0),
+        );
+        if (edgeDelay)
+          await new Promise((resolve) => setTimeout(resolve, edgeDelay));
         const side = ["left", "right"].includes(search.get("edge"))
           ? search.get("edge")
           : null;

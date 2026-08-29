@@ -265,6 +265,7 @@ function applyWidgetEdge(next = {}) {
   wrap.classList.toggle("edge-collapsed", !!side && next.collapsed === true);
   if (side) wrap.dataset.edge = side;
   else delete wrap.dataset.edge;
+  wrap.classList.add("widget-layout-ready");
 }
 function panel() {
   return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><button type="button" class="update-entry" id="update-entry" data-action="open-update" hidden>有新版本</button><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div><div class="header-actions"><button class="console-button" data-console="usage" title="在默认浏览器打开配置的 Keeper 地址">用量控制台</button><button class="console-button" data-console="cpa" id="cpa-console" disabled title="连接后获取 CPA 地址">CPA 控制台</button><button class="settings-button" data-action="settings">设置</button></div>${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
@@ -1080,6 +1081,18 @@ root.innerHTML = preview
       ? ""
       : panel();
 
+// The native window may already be restored at its 34 DIP collapsed width.
+// Resolve that layout before painting the widget so the 216 DIP layout cannot flash clipped.
+if ($("#widget")) {
+  await api.on("widget-edge", applyWidgetEdge);
+  try {
+    applyWidgetEdge(await api.call("widget_edge_state"));
+  } catch (error) {
+    console.error(error);
+    applyWidgetEdge();
+  }
+}
+
 document.addEventListener("click", async (event) => {
   const b = event.target.closest("button");
   if (!b) return;
@@ -1526,14 +1539,6 @@ if (windowName !== "settings") {
     state.generation++;
     state.loading = false;
   });
-}
-if ($("#widget")) {
-  await api.on("widget-edge", applyWidgetEdge);
-  try {
-    applyWidgetEdge(await api.call("widget_edge_state"));
-  } catch (error) {
-    console.error(error);
-  }
 }
 try {
   state.settings = await api.call("get_settings");

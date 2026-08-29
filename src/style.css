@@ -173,6 +173,9 @@ svg {
   height: 74px;
   padding: 8px;
 }
+.widget-wrap:not(.widget-layout-ready) {
+  visibility: hidden;
+}
 .widget {
   position: relative;
   display: grid;
