@@ -876,9 +876,6 @@ pub fn track(app: tauri::AppHandle) {
             if !fullscreen && hidden_for_fullscreen {
                 state.hover.lock().unwrap().fullscreen_hidden = false;
                 show_inactive(&widget);
-                if state.hover.lock().unwrap().update_prompt {
-                    show_detail(&app);
-                }
             }
         }
         if !visible(&widget) {
