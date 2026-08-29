@@ -92,6 +92,13 @@ const $ = (selector) => document.querySelector(selector);
 const root = $("#app");
 const applyAppearance = () => {
   document.documentElement.dataset.theme = state.settings.theme || "light";
+  const accent = /^#[0-9a-f]{6}$/i.test(state.settings.accentColor || "")
+    ? state.settings.accentColor
+    : "";
+  document.documentElement.toggleAttribute("data-custom-accent", !!accent);
+  if (accent)
+    document.documentElement.style.setProperty("--accent-custom", accent);
+  else document.documentElement.style.removeProperty("--accent-custom");
   document.documentElement.style.setProperty(
     "--widget-font",
     widgetFontStack(state.settings.widgetFont),
@@ -168,9 +175,9 @@ const cards = (items, columns = 2) =>
   `<div class="metric-grid columns-${columns}">${items.map(([label, value, hint, mark]) => `<div class="metric-card"><div class="metric-label">${mark ? icon(mark) : ""}${e(label)}</div><div class="metric-value num" title="${e(value)}">${e(value)}</div>${hint ? `<p title="${e(hint)}">${e(hint)}</p>` : ""}</div>`).join("")}</div>`;
 const heading = (text, right = "") =>
   `<div class="group-title"><span>${e(text)}</span><span class="muted">${e(right)}</span></div>`;
-const table = (headers, items, kinds = []) =>
+const table = (headers, items, kinds = [], extraClass = "") =>
   items.length
-    ? `<div class="table-wrap" tabindex="0" role="region" aria-label="${e(headers[0])}明细表，可横向滚动"><table class="data-table"><thead><tr>${headers.map((h, i) => `<th scope="col" class="cell-${kinds[i] || (i ? "number" : "name")}">${e(h)}</th>`).join("")}</tr></thead><tbody>${items
+    ? `<div class="table-wrap ${extraClass}" tabindex="0" role="region" aria-label="${e(headers[0])}明细表，可横向滚动"><table class="data-table"><thead><tr>${headers.map((h, i) => `<th scope="col" class="cell-${kinds[i] || (i ? "number" : "name")}">${e(h)}</th>`).join("")}</tr></thead><tbody>${items
         .map(
           (row) =>
             `<tr>${row
@@ -182,6 +189,10 @@ const table = (headers, items, kinds = []) =>
               .join("")}</tr>`,
         )
         .join("")}</tbody></table></div>`
+    : `<div class="rows-card empty-inline">此范围暂无记录</div>`;
+const requestTable = (headers, items, kinds) =>
+  items.length
+    ? `<div class="request-table-frame"><div class="request-table-scroll" tabindex="0" role="region" aria-label="请求明细横向滚动条"><div class="request-table-scroll-width"></div></div>${table(headers, items, kinds, "request-table-wrap")}</div>`
     : `<div class="rows-card empty-inline">此范围暂无记录</div>`;
 const picker = (name, label, options, selected, extra = "") =>
   `<details class="picker ${extra}"><summary aria-label="${name === "key" ? "选择 Key owner" : name === "range" ? "更多日期范围" : name === "account" ? "选择认证账户" : "切换分布维度"}">${name === "key" ? icon("key") : ""}<span class="picker-label">${e(label)}</span>${icon("chevron")}</summary><div class="picker-menu">${options.map(([value, text]) => `<button data-pick="${name}" data-value="${e(value)}" class="${String(value) === String(selected) ? "selected" : ""}" title="${e(text)}">${e(text)}</button>`).join("")}</div></details>`;
@@ -326,13 +337,7 @@ function latency(data) {
       ["最长请求耗时", duration(data.max_latency_ms)],
     ]) +
     heading("样本信息") +
-    rows([
-      ["有效样本", number(data.total_points)],
-      ["统计口径", "直接采用 Keeper 汇总值"],
-    ]) +
-    note(
-      "仅包含有效上报的延迟。导入的零延迟不代表瞬间完成；不从散点反推全量分位数。",
-    )
+    rows([["有效样本", number(data.total_points)]])
   );
 }
 function distribution(data) {
@@ -482,28 +487,46 @@ function accountBody(account, data) {
       ) +
       heading("额度变化效率") +
       table(
-        ["观察结束", "额度变化", "Token", "每百分点 Token", "每百分点成本"],
+        [
+          "观察结束",
+          "额度变化",
+          "下降百分点",
+          "区间 Token",
+          "每百分点 Token",
+          "区间成本",
+          "每百分点成本",
+        ],
         cycles
           .flatMap((c) => c.transitions || [])
-          .map((t) => [
-            time(t.interval_ended_at),
-            `${t.from_remaining_percent}% → ${t.to_remaining_percent}%`,
-            number(t.usage?.total_tokens),
-            number(t.tokens_per_point),
-            cost(t, "cost_per_point", "cost_per_point_available"),
-          ]),
-        ["time", "text", "number", "number", "number"],
+          .map((t) => {
+            const points =
+              t.percentage_points ??
+              Number(t.from_remaining_percent) - Number(t.to_remaining_percent);
+            return [
+              time(t.interval_ended_at),
+              `${t.from_remaining_percent}% → ${t.to_remaining_percent}%`,
+              number(points),
+              number(t.usage?.total_tokens),
+              number(t.tokens_per_point),
+              cost(t.usage, "total_cost_usd"),
+              cost(t, "cost_per_point", "cost_per_point_available"),
+            ];
+          }),
+        ["time", "text", "number", "number", "number", "number", "number"],
       ) +
-      note("未观测到的日期不补零，百分点不等同于 Token。")
+      note(
+        "每百分点值 = 区间总量 ÷ 实际下降百分点；下降 1 个百分点时，两列数值相同。成本按同一区间动态计价后再除以下降百分点，缺少任一定价时显示 —。",
+      )
     );
   }
   if (state.accountTab === "requests")
     return (
       note("按所选日期、Key 与当前账户筛选，不读取原始请求正文。") +
       heading("请求明细", "横向滚动查看完整指标") +
-      table(
+      requestTable(
         [
           "时间（北京）",
+          "sk",
           "模型",
           "结果",
           "输入",
@@ -517,6 +540,7 @@ function accountBody(account, data) {
         ],
         (data.events || []).map((m) => [
           time(m.timestamp),
+          m.api_key || "—",
           m.model,
           m.failed ? "失败" : "成功",
           number(m.tokens?.input_tokens),
@@ -530,6 +554,7 @@ function accountBody(account, data) {
         ]),
         [
           "time",
+          "name",
           "name",
           "text",
           "number",
@@ -587,7 +612,29 @@ function query() {
 function renderData() {
   if (!$("#content")) return;
   const renders = { summary, analysis: costs, latency, distribution, accounts };
-  $("#content").innerHTML = renders[state.tab](state.data);
+  const content = $("#content");
+  const requestView =
+    state.tab === "accounts" && state.accountTab === "requests";
+  content.classList.toggle("request-view", requestView);
+  content.innerHTML = renders[state.tab](state.data);
+  if (requestView) setupRequestTableScroll();
+}
+
+function setupRequestTableScroll() {
+  const top = $(".request-table-scroll");
+  const width = $(".request-table-scroll-width");
+  const body = $(".request-table-wrap");
+  if (!top || !width || !body) return;
+  requestAnimationFrame(() => {
+    width.style.width = `${body.scrollWidth}px`;
+    top.scrollLeft = body.scrollLeft;
+  });
+  top.addEventListener("scroll", () => {
+    body.scrollLeft = top.scrollLeft;
+  });
+  body.addEventListener("scroll", () => {
+    top.scrollLeft = body.scrollLeft;
+  });
 }
 async function load(background = false) {
   if (!$("#content") || !state.visible || !state.access) return;
@@ -604,9 +651,11 @@ async function load(background = false) {
   }
   const gen = ++state.generation;
   state.loading = true;
-  if (!background)
+  if (!background) {
+    $("#content").classList.remove("request-view");
     $("#content").innerHTML =
       '<div class="skeleton"></div><div class="skeleton short"></div><div class="skeleton"></div>';
+  }
   try {
     let data;
     if (state.tab === "accounts") {
@@ -708,7 +757,9 @@ async function openDetail() {
 function settings() {
   const s = state.settings;
   const sk = s.authMode === "api_key";
-  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper</div><span class="spacer"></span><span class="eyebrow">连接设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body"><label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><div class="preference-row"><label for="auth-mode">登录方式</label><select id="auth-mode" name="authMode"><option value="admin" ${sk ? "" : "selected"}>管理员密码</option><option value="api_key" ${sk ? "selected" : ""}>API Key（sk）</option></select></div><label class="field"><span id="credential-label">${sk ? "CPA API Key（sk）" : "管理员登录密码"}</span><input type="password" name="password" placeholder="${s.hasPassword ? "已保存凭据，留空继续使用" : sk ? "sk-…" : "Keeper 管理员密码"}" autocomplete="current-password" spellcheck="false"></label><p class="field-hint" id="auth-hint">${sk ? "仅可查看此 Key 的用量，不开放管理员指标。" : "可查看全部用量，或按 Key owner 筛选。"}</p><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住登录凭据 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row" id="clear-credential"><input type="checkbox" name="clearPassword">清除已保存凭据（无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><label class="check-row tls-warning"><input type="checkbox" name="allowInvalidCertificates" ${s.allowInvalidCertificates ? "checked" : ""}><span><strong>忽略 HTTPS 证书验证</strong><small>仅限受信任内网；会接受伪造或过期证书，建议优先安装内网代理 CA。</small></span></label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details><hr class="setting-divider"><div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label for="display-hold-seconds">非零数据保留 <span class="muted">/ 秒</span></label><input id="display-hold-seconds" name="displayHoldSeconds" type="number" min="0" max="300" value="${s.displayHoldSeconds ?? 16}" required></div><p class="field-hint setting-hint">连续收到零用量达到此时长后归零；设为 0 即立即归零。</p><div class="preference-row"><label>外观</label><div class="segments">${[
+  const section = (id, title, hint, content) =>
+    `<section class="setting-section" data-setting-section="${id}"><header><h2>${title}</h2><p>${hint}</p></header>${content}</section>`;
+  const themeButtons = [
     ["light", "浅色"],
     ["dark", "深色"],
   ]
@@ -716,9 +767,42 @@ function settings() {
       ([id, label]) =>
         `<button type="button" data-theme="${id}" class="${s.theme === id ? "active" : ""}">${label}</button>`,
     )
-    .join(
-      "",
-    )}</div></div><label class="field">悬浮球字体<input name="widgetFont" type="text" list="font-options" placeholder="HarmonyOS Sans SC" value="${e(s.widgetFont || "HarmonyOS Sans SC")}"></label><datalist id="font-options"><option value="HarmonyOS Sans SC"><option value="Microsoft YaHei UI"><option value="Microsoft YaHei"><option value="Segoe UI"><option value="Noto Sans SC"></datalist><p class="field-hint">未安装时自动回退：鸿蒙黑体 → 微软雅黑 → 系统无衬线字体。</p><label class="check-row"><input type="checkbox" name="autoStart" ${s.autoStart ? "checked" : ""}>登录 Windows 后启动</label></div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form><section class="connection-error-dialog" id="connection-error-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-error-title" aria-describedby="connection-error-summary" hidden><div class="connection-error-card"><div class="error-dialog-kicker">CONNECTION / ERRLOG</div><h2 id="connection-error-title">Keeper 连接失败</h2><p id="connection-error-summary"></p><pre id="connection-errlog" tabindex="0"></pre><p class="error-dialog-hint">日志已隐藏登录凭据与代理认证信息，可直接复制用于排查。</p><div class="error-dialog-actions"><button type="button" data-error-action="close">返回设置</button><button type="button" class="copy-errlog" data-error-action="copy">复制 ERRLOG</button></div></div></section></main></div>`;
+    .join("");
+  const accent = /^#[0-9a-f]{6}$/i.test(s.accentColor || "")
+    ? s.accentColor.toLowerCase()
+    : "";
+  const accentButtons = [
+    ["#1756a9", "深海蓝"],
+    ["#087f8c", "青绿"],
+    ["#167144", "森林绿"],
+    ["#9a5b00", "琥珀"],
+    ["#b52a36", "砖红"],
+    ["#8c3f78", "莓紫"],
+  ]
+    .map(
+      ([color, label]) =>
+        `<button type="button" class="accent-swatch ${accent === color ? "active" : ""}" data-accent="${color}" style="--swatch:${color}" title="${label}" aria-label="主题色：${label}"></button>`,
+    )
+    .join("");
+  const connection = section(
+    "connection",
+    "连接参数",
+    "Keeper 地址、登录凭据与网络通道",
+    `<label class="field">Keeper 地址<input type="url" name="endpoint" required placeholder="https://keeper.example/usage" value="${e(s.endpoint || "")}" autocomplete="url"></label><p class="field-hint">填写完整页面地址；有 /usage 路径时请保留。</p><div class="preference-row"><label for="auth-mode">登录方式</label><select id="auth-mode" name="authMode"><option value="admin" ${sk ? "" : "selected"}>管理员密码</option><option value="api_key" ${sk ? "selected" : ""}>API Key（sk）</option></select></div><label class="field"><span id="credential-label">${sk ? "CPA API Key（sk）" : "管理员登录密码"}</span><input type="password" name="password" placeholder="${s.hasPassword ? "已保存凭据，留空继续使用" : sk ? "sk-…" : "Keeper 管理员密码"}" autocomplete="current-password" spellcheck="false"></label><p class="field-hint" id="auth-hint">${sk ? "仅可查看此 Key 的用量，不开放管理员指标。" : "可查看全部用量，或按 Key owner 筛选。"}</p><label class="check-row"><input type="checkbox" name="rememberPassword" ${s.rememberPassword ? "checked" : ""}>记住登录凭据 · Windows 用户加密</label>${s.hasPassword ? '<label class="check-row" id="clear-credential"><input type="checkbox" name="clearPassword">清除已保存凭据（无密码 Keeper）</label>' : ""}<label class="check-row"><input type="checkbox" name="allowPrivateHttp" ${s.allowPrivateHttp ? "checked" : ""}>允许受保护专网内的 HTTP 连接</label><label class="check-row tls-warning"><input type="checkbox" name="allowInvalidCertificates" ${s.allowInvalidCertificates ? "checked" : ""}><span><strong>忽略 HTTPS 证书验证</strong><small>仅限受信任内网；会接受伪造或过期证书，建议优先安装内网代理 CA。</small></span></label><details class="proxy-settings" ${s.proxyUrl ? "open" : ""}><summary>代理设置 <span class="muted">· 可选</span>${icon("chevron")}</summary><label class="field">HTTP / SOCKS5 代理<input name="proxyUrl" type="text" placeholder="socks5://127.0.0.1:1080" value="${e(s.proxyUrl || "")}" autocomplete="off"></label><p class="field-hint">留空直连。支持 http://、socks5://、socks5h://；认证格式为 scheme://用户:密码@主机:端口，特殊字符需 URL 编码。代理地址加密保存。</p></details>`,
+  );
+  const appearance = section(
+    "appearance",
+    "外观与样式",
+    "主题、强调色与悬浮窗字体",
+    `<div class="preference-row"><label>明暗主题</label><div class="segments">${themeButtons}</div></div><div class="accent-setting"><div class="preference-row"><label for="accent-color-picker">主题色</label><button type="button" class="accent-default ${accent ? "" : "active"}" data-accent="">跟随主题</button></div><input type="hidden" name="accentColor" value="${e(accent)}"><div class="accent-palette">${accentButtons}<label class="accent-picker" title="打开系统调色盘"><input id="accent-color-picker" type="color" value="${e(accent || (s.theme === "dark" ? "#8bbbff" : "#1756a9"))}" aria-label="自定义主题色"><span>自定义</span></label></div></div><label class="field">悬浮窗字体<input name="widgetFont" type="text" list="font-options" placeholder="HarmonyOS Sans SC" value="${e(s.widgetFont || "HarmonyOS Sans SC")}"></label><datalist id="font-options"><option value="HarmonyOS Sans SC"><option value="Microsoft YaHei UI"><option value="Microsoft YaHei"><option value="Segoe UI"><option value="Noto Sans SC"></datalist><p class="field-hint">未安装时自动回退：鸿蒙黑体 → 微软雅黑 → 系统无衬线字体。</p>`,
+  );
+  const behavior = section(
+    "behavior",
+    "悬浮窗行为",
+    "刷新频率、数据展示与自动隐藏",
+    `<div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label for="display-hold-seconds">非零数据保留 <span class="muted">/ 秒</span></label><input id="display-hold-seconds" name="displayHoldSeconds" type="number" min="0" max="300" value="${s.displayHoldSeconds ?? 16}" required></div><p class="field-hint setting-hint">连续收到零用量达到此时长后归零；设为 0 即立即归零。</p><label class="check-row setting-toggle"><input type="checkbox" name="edgeAutoCollapse" ${s.edgeAutoCollapse !== false ? "checked" : ""}><span><strong>贴近屏幕边缘自动收起</strong><small>拖到屏幕左右外沿时折叠，移入鼠标后展开。</small></span></label><label class="check-row setting-toggle"><input type="checkbox" name="fullscreenAutoHide" ${s.fullscreenAutoHide !== false ? "checked" : ""}><span><strong>全屏时自动隐藏悬浮窗</strong><small>游戏、视频或无边框全屏结束后自动恢复展示。</small></span></label><label class="check-row setting-toggle"><input type="checkbox" name="autoStart" ${s.autoStart ? "checked" : ""}><span><strong>登录 Windows 后启动</strong><small>随当前用户会话自动启动用量面板。</small></span></label>`,
+  );
+  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><span class="spacer"></span><span class="eyebrow">设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body">${connection}${appearance}${behavior}</div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form><section class="connection-error-dialog" id="connection-error-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-error-title" aria-describedby="connection-error-summary" hidden><div class="connection-error-card"><div class="error-dialog-kicker">CONNECTION / ERRLOG</div><h2 id="connection-error-title">Keeper 连接失败</h2><p id="connection-error-summary"></p><pre id="connection-errlog" tabindex="0"></pre><p class="error-dialog-hint">日志已隐藏登录凭据与代理认证信息，可直接复制用于排查。</p><div class="error-dialog-actions"><button type="button" data-error-action="close">返回设置</button><button type="button" class="copy-errlog" data-error-action="copy">复制 ERRLOG</button></div></div></section></main></div>`;
 }
 
 root.innerHTML = preview
@@ -757,6 +841,19 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
+  if ("accent" in b.dataset) {
+    const accent = b.dataset.accent;
+    state.settings.accentColor = accent;
+    const hidden = $('[name="accentColor"]');
+    const picker = $("#accent-color-picker");
+    if (hidden) hidden.value = accent;
+    if (picker && accent) picker.value = accent;
+    document
+      .querySelectorAll("[data-accent]")
+      .forEach((el) => el.classList.toggle("active", el === b));
+    applyAppearance();
+    return;
+  }
   if (b.dataset.action) {
     const name = b.dataset.action;
     if (name === "refresh") {
@@ -785,7 +882,7 @@ document.addEventListener("click", async (event) => {
   }
   if (b.dataset.theme) {
     state.settings.theme = b.dataset.theme;
-    document.documentElement.dataset.theme = b.dataset.theme;
+    applyAppearance();
     document
       .querySelectorAll("[data-theme]")
       .forEach((el) => el.classList.toggle("active", el === b));
@@ -862,6 +959,15 @@ document.addEventListener("change", (event) => {
     : "可查看全部用量，或按 Key owner 筛选。";
   if ($("#clear-credential")) $("#clear-credential").hidden = sk;
 });
+document.addEventListener("input", (event) => {
+  if (event.target.id !== "accent-color-picker") return;
+  state.settings.accentColor = event.target.value.toLowerCase();
+  $('[name="accentColor"]').value = state.settings.accentColor;
+  document
+    .querySelectorAll("[data-accent]")
+    .forEach((el) => el.classList.remove("active"));
+  applyAppearance();
+});
 document.addEventListener("submit", async (event) => {
   if (event.target.id !== "settings-form") return;
   event.preventDefault();
@@ -879,11 +985,14 @@ document.addEventListener("submit", async (event) => {
         authMode: form.get("authMode"),
         proxyUrl: form.get("proxyUrl"),
         widgetFont: form.get("widgetFont"),
+        accentColor: form.get("accentColor"),
         pollSeconds: Number(form.get("pollSeconds")),
         displayHoldSeconds: Number(form.get("displayHoldSeconds")),
         rememberPassword: form.has("rememberPassword"),
         allowPrivateHttp: form.has("allowPrivateHttp"),
         allowInvalidCertificates: form.has("allowInvalidCertificates"),
+        edgeAutoCollapse: form.has("edgeAutoCollapse"),
+        fullscreenAutoHide: form.has("fullscreenAutoHide"),
         autoStart: form.has("autoStart"),
       },
       clearPassword: form.has("clearPassword"),

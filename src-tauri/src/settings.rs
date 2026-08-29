@@ -11,10 +11,13 @@ pub struct Settings {
     pub remember_password: bool,
     pub poll_seconds: u32,
     pub display_hold_seconds: u32,
+    pub edge_auto_collapse: bool,
+    pub fullscreen_auto_hide: bool,
     pub allow_private_http: bool,
     pub allow_invalid_certificates: bool,
     pub auto_start: bool,
     pub theme: String,
+    pub accent_color: String,
     pub proxy_url: String,
     pub widget_font: String,
     pub x: Option<i32>,
@@ -30,10 +33,13 @@ impl Default for Settings {
             remember_password: true,
             poll_seconds: 2,
             display_hold_seconds: 16,
+            edge_auto_collapse: true,
+            fullscreen_auto_hide: true,
             allow_private_http: false,
             allow_invalid_certificates: false,
             auto_start: false,
             theme: "light".into(),
+            accent_color: String::new(),
             proxy_url: String::new(),
             widget_font: "HarmonyOS Sans SC".into(),
             x: None,
@@ -49,6 +55,8 @@ mod tests {
     fn older_settings_keep_the_default_display_hold() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.display_hold_seconds, 16);
+        assert!(settings.edge_auto_collapse);
+        assert!(settings.fullscreen_auto_hide);
         assert!(!settings.allow_invalid_certificates);
     }
 }
@@ -132,6 +140,8 @@ mod platform {
             .get_value::<u32, _>("DisplayHoldSeconds")
             .unwrap_or(16)
             .min(300);
+        s.edge_auto_collapse = k.get_value::<u32, _>("EdgeAutoCollapse").unwrap_or(1) == 1;
+        s.fullscreen_auto_hide = k.get_value::<u32, _>("FullscreenAutoHide").unwrap_or(1) == 1;
         s.remember_password = k.get_value::<u32, _>("RememberPassword").unwrap_or(1) == 1;
         s.allow_private_http = k.get_value::<u32, _>("AllowPrivateHttp").unwrap_or(0) == 1;
         s.allow_invalid_certificates = k
@@ -140,6 +150,7 @@ mod platform {
             == 1;
         s.auto_start = k.get_value::<u32, _>("AutoStart").unwrap_or(0) == 1;
         s.theme = k.get_value("Theme").unwrap_or("light".into());
+        s.accent_color = k.get_value("AccentColor").unwrap_or_default();
         s.x = k.get_value::<u32, _>("X").ok().map(|v| v as i32);
         s.y = k.get_value::<u32, _>("Y").ok().map(|v| v as i32);
         if s.remember_password {
@@ -186,7 +197,10 @@ mod platform {
             )?;
             k.set_value("PollSeconds", &s.poll_seconds)?;
             k.set_value("DisplayHoldSeconds", &s.display_hold_seconds)?;
+            k.set_value("EdgeAutoCollapse", &(s.edge_auto_collapse as u32))?;
+            k.set_value("FullscreenAutoHide", &(s.fullscreen_auto_hide as u32))?;
             k.set_value("Theme", &s.theme)?;
+            k.set_value("AccentColor", &s.accent_color)?;
             k.set_value("WidgetFont", &s.widget_font)?;
             if let Some(bytes) = proxy {
                 k.set_raw_value(

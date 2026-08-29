@@ -33,6 +33,8 @@ pub struct Hover {
     entered: Option<Instant>,
     left: Option<Instant>,
     dock: Option<Dock>,
+    fullscreen_hidden: bool,
+    fullscreen_checked: Option<Instant>,
 }
 
 impl Hover {
@@ -118,6 +120,13 @@ fn point_inside(rect: DisplayRect, x: f64, y: f64, margin: f64) -> bool {
         && x <= rect.right as f64 - margin
         && y >= rect.top as f64 + margin
         && y <= rect.bottom as f64 - margin
+}
+
+fn rect_covers_display(rect: DisplayRect, display: DisplayRect, tolerance: i32) -> bool {
+    rect.left <= display.left + tolerance
+        && rect.top <= display.top + tolerance
+        && rect.right >= display.right - tolerance
+        && rect.bottom >= display.bottom - tolerance
 }
 
 fn dock_strip_contains(
@@ -297,6 +306,35 @@ mod tests {
         assert!(!point_inside(expanded, 1919., 230., 8.));
         assert!(dock_strip_contains(dock, 200, 274, 1., 1919., 230.));
     }
+
+    #[test]
+    fn fullscreen_geometry_covers_the_complete_monitor_not_just_the_work_area() {
+        let display = DisplayRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        assert!(rect_covers_display(display, display, 2));
+        assert!(rect_covers_display(
+            DisplayRect {
+                left: -1,
+                top: -1,
+                right: 1921,
+                bottom: 1081,
+            },
+            display,
+            2,
+        ));
+        assert!(!rect_covers_display(
+            DisplayRect {
+                bottom: 1040,
+                ..display
+            },
+            display,
+            2,
+        ));
+    }
 }
 
 pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -340,7 +378,7 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         .clamp(area.1, (area.3 - size.height as i32).max(area.1));
     widget.set_position(PhysicalPosition::new(x, y))?;
     // Restore an old snapped position; a first-run default remains expanded.
-    if restore_edge {
+    if restore_edge && config.edge_auto_collapse {
         dock_if_near(app, &widget, 12.);
     }
     use tauri::menu::{Menu, MenuItem};
@@ -355,9 +393,7 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, e| match e.id.as_ref() {
             "show" => {
-                if let Some(w) = app.get_webview_window("widget") {
-                    show_inactive(&w);
-                }
+                show_widget(app);
             }
             "settings" => show_settings(app),
             "hide" => hide(app),
@@ -402,6 +438,16 @@ pub fn show_inactive(w: &tauri::WebviewWindow) {
     #[cfg(not(windows))]
     let _ = w.show();
 }
+pub fn show_widget(app: &tauri::AppHandle) {
+    app.state::<AppState>()
+        .hover
+        .lock()
+        .unwrap()
+        .fullscreen_hidden = false;
+    if let Some(widget) = app.get_webview_window("widget") {
+        show_inactive(&widget);
+    }
+}
 fn hide_native(w: &tauri::WebviewWindow) {
     #[cfg(windows)]
     unsafe {
@@ -424,6 +470,11 @@ pub fn hide_detail(app: &tauri::AppHandle) {
     }
 }
 pub fn hide(app: &tauri::AppHandle) {
+    app.state::<AppState>()
+        .hover
+        .lock()
+        .unwrap()
+        .fullscreen_hidden = false;
     hide_detail(app);
     if let Some(w) = app.get_webview_window("widget") {
         hide_native(&w);
@@ -536,6 +587,15 @@ fn emit_edge(window: &tauri::WebviewWindow, state: WidgetEdgeState) {
 }
 
 fn collapse_docked(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
+    if !app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .unwrap()
+        .edge_auto_collapse
+    {
+        return;
+    }
     let state = app.state::<AppState>();
     let Some(dock) = state.hover.lock().unwrap().dock else {
         return;
@@ -604,6 +664,15 @@ fn expand_docked(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
     emit_edge(widget, next);
 }
 
+fn clear_dock(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
+    expand_docked(app, widget);
+    let state = app.state::<AppState>();
+    let changed = state.hover.lock().unwrap().dock.take().is_some();
+    if changed {
+        emit_edge(widget, edge_state(&state.hover.lock().unwrap()));
+    }
+}
+
 pub fn prepare_drag(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
     expand_docked(app, widget);
     let state = app.state::<AppState>();
@@ -624,19 +693,32 @@ fn dock_if_near(
     widget: &tauri::WebviewWindow,
     threshold_dip: f64,
 ) -> bool {
+    let edge_auto_collapse = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .unwrap()
+        .edge_auto_collapse;
+    if !edge_auto_collapse {
+        clear_dock(app, widget);
+    }
     let (Ok(position), Ok(size)) = (widget.outer_position(), widget.outer_size()) else {
         return false;
     };
     let area = work_area(widget);
     let scale = widget.scale_factor().unwrap_or(1.);
     let threshold = (threshold_dip * scale).round() as i32;
-    let side = dock_side(
-        position.x,
-        position.x + size.width as i32,
-        area.0,
-        area.2,
-        threshold,
-    );
+    let side = edge_auto_collapse
+        .then(|| {
+            dock_side(
+                position.x,
+                position.x + size.width as i32,
+                area.0,
+                area.2,
+                threshold,
+            )
+        })
+        .flatten();
     let max_x = (area.2 - size.width as i32).max(area.0);
     let max_y = (area.3 - size.height as i32).max(area.1);
     let y = position.y.clamp(area.1, max_y);
@@ -698,6 +780,92 @@ fn finish_drag(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
     persist_widget_position(app, widget);
 }
 
+#[cfg(windows)]
+fn foreground_is_fullscreen(app: &tauri::AppHandle) -> bool {
+    unsafe {
+        use windows_sys::Win32::{
+            Foundation::RECT,
+            Graphics::Gdi::{
+                GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL,
+            },
+            UI::WindowsAndMessaging::{
+                GetDesktopWindow, GetForegroundWindow, GetShellWindow, GetWindowRect, IsIconic,
+            },
+        };
+        let foreground = GetForegroundWindow();
+        if foreground.is_null()
+            || foreground == GetDesktopWindow()
+            || foreground == GetShellWindow()
+            || IsIconic(foreground) != 0
+        {
+            return false;
+        }
+        if ["widget", "detail", "settings"].into_iter().any(|label| {
+            app.get_webview_window(label)
+                .and_then(|window| window.hwnd().ok())
+                .is_some_and(|hwnd| hwnd.0 as isize == foreground as isize)
+        }) {
+            return false;
+        }
+        let monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONULL);
+        if monitor.is_null() {
+            return false;
+        }
+        let mut info = std::mem::zeroed::<MONITORINFO>();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        let mut rect = std::mem::zeroed::<RECT>();
+        if GetMonitorInfoW(monitor, &mut info) == 0 || GetWindowRect(foreground, &mut rect) == 0 {
+            return false;
+        }
+        rect_covers_display(
+            DisplayRect {
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            },
+            DisplayRect {
+                left: info.rcMonitor.left,
+                top: info.rcMonitor.top,
+                right: info.rcMonitor.right,
+                bottom: info.rcMonitor.bottom,
+            },
+            2,
+        )
+    }
+}
+
+#[cfg(not(windows))]
+fn foreground_is_fullscreen(_: &tauri::AppHandle) -> bool {
+    false
+}
+
+pub fn apply_behavior_settings(app: &tauri::AppHandle) {
+    let (edge_auto_collapse, fullscreen_auto_hide) = {
+        let settings = app.state::<AppState>();
+        let settings = settings.settings.lock().unwrap();
+        (settings.edge_auto_collapse, settings.fullscreen_auto_hide)
+    };
+    let Some(widget) = app.get_webview_window("widget") else {
+        return;
+    };
+    if edge_auto_collapse {
+        dock_if_near(app, &widget, 12.);
+    } else {
+        clear_dock(app, &widget);
+    }
+    if !fullscreen_auto_hide {
+        let should_restore = {
+            let state = app.state::<AppState>();
+            let mut hover = state.hover.lock().unwrap();
+            std::mem::take(&mut hover.fullscreen_hidden)
+        };
+        if should_restore {
+            show_inactive(&widget);
+        }
+    }
+}
+
 pub fn session_locked() -> bool {
     #[cfg(windows)]
     unsafe {
@@ -718,10 +886,38 @@ pub fn track(app: tauri::AppHandle) {
         let Some(widget) = app.get_webview_window("widget") else {
             break;
         };
+        let state = app.state::<AppState>();
+        let now = Instant::now();
+        let check_fullscreen = {
+            let mut hover = state.hover.lock().unwrap();
+            if hover
+                .fullscreen_checked
+                .is_some_and(|checked| now.duration_since(checked) < Duration::from_millis(320))
+            {
+                false
+            } else {
+                hover.fullscreen_checked = Some(now);
+                true
+            }
+        };
+        if check_fullscreen {
+            let enabled = state.settings.lock().unwrap().fullscreen_auto_hide;
+            let fullscreen = enabled && foreground_is_fullscreen(&app);
+            let hidden_for_fullscreen = state.hover.lock().unwrap().fullscreen_hidden;
+            if fullscreen && !hidden_for_fullscreen && visible(&widget) {
+                hide_detail(&app);
+                hide_native(&widget);
+                state.hover.lock().unwrap().fullscreen_hidden = true;
+                continue;
+            }
+            if !fullscreen && hidden_for_fullscreen {
+                state.hover.lock().unwrap().fullscreen_hidden = false;
+                show_inactive(&widget);
+            }
+        }
         if !visible(&widget) {
             continue;
         }
-        let state = app.state::<AppState>();
         let dragging = state.hover.lock().unwrap().dragging;
         let Ok(cursor) = widget.cursor_position() else {
             continue;

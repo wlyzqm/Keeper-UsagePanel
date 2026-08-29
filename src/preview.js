@@ -154,11 +154,14 @@ export function createPreview(search) {
           pollSeconds: 2,
           displayHoldSeconds: 16,
           theme: search.get("theme") || "light",
+          accentColor: "",
           rememberPassword: true,
           hasPassword: false,
           autoStart: false,
           allowPrivateHttp: false,
           allowInvalidCertificates: false,
+          edgeAutoCollapse: true,
+          fullscreenAutoHide: true,
         };
       if (command === "last_sample") return offline ? null : sample;
       if (command === "sample") {
@@ -275,10 +278,15 @@ export function createPreview(search) {
                     interval_ended_at: sample.sampled_at,
                     from_remaining_percent: 100,
                     to_remaining_percent: 82,
+                    percentage_points: 18,
                     tokens_per_point: 78235,
-                    cost_per_point: 0.24,
+                    cost_per_point: 0.2433333333,
                     cost_per_point_available: true,
-                    usage: { total_tokens: 1408230 },
+                    usage: {
+                      total_tokens: 1408230,
+                      total_cost_usd: 4.38,
+                      cost_available: true,
+                    },
                   },
                 ],
               },
@@ -286,8 +294,9 @@ export function createPreview(search) {
           };
         case "requests":
           return {
-            events: Array.from({ length: q.cursor ? 2 : 6 }, (_, i) => ({
+            events: Array.from({ length: q.cursor ? 2 : 24 }, (_, i) => ({
               timestamp: sample.sampled_at,
+              api_key: i % 2 ? "日常使用" : "开发项目 · sk-*********123456",
               model: i % 2 ? "gpt-5.4-mini" : "gpt-5.4",
               failed: false,
               tokens: {

@@ -96,6 +96,10 @@ try {
   for (const tab of ["analysis", "latency", "distribution", "accounts"]) {
     await page.locator(`[data-tab=${tab}]`).click();
     await page.locator(".skeleton").first().waitFor({ state: "detached" });
+    if (tab === "latency") {
+      assert.equal(await page.getByText("统计口径").count(), 0);
+      assert.equal(await page.locator(".rows-card .metric-row").count(), 1);
+    }
     await page.screenshot({ path: `.cache/screenshots/${tab}.png` });
   }
   for (const tab of ["quota-history", "requests", "errors"]) {
@@ -106,6 +110,41 @@ try {
         .locator(tab === "errors" ? ".error-event" : ".data-table")
         .count(),
     );
+    if (tab === "quota-history") {
+      assert.deepEqual(
+        await page
+          .locator(".data-table")
+          .last()
+          .locator("th")
+          .allTextContents(),
+        [
+          "观察结束",
+          "额度变化",
+          "下降百分点",
+          "区间 Token",
+          "每百分点 Token",
+          "区间成本",
+          "每百分点成本",
+        ],
+      );
+      assert.deepEqual(
+        (
+          await page
+            .locator(".data-table")
+            .last()
+            .locator("tbody tr")
+            .first()
+            .locator("td")
+            .allTextContents()
+        ).slice(1),
+        ["100% → 82%", "18", "1,408,230", "78,235", "$4.38", "$0.2433"],
+      );
+      assert.ok(
+        (await page.locator(".note").last().innerText()).includes(
+          "区间总量 ÷ 实际下降百分点",
+        ),
+      );
+    }
   }
   await page.goto("http://127.0.0.1:1420/?preview=1&theme=dark");
   await page.locator(".metric-value").first().waitFor();
@@ -133,9 +172,47 @@ try {
   await page.screenshot({ path: ".cache/screenshots/offline.png" });
   await page.goto("http://127.0.0.1:1420/?preview=1&window=settings");
   await page.locator("#settings-form").waitFor();
+  assert.deepEqual(
+    await page.locator(".setting-section > header h2").allTextContents(),
+    ["连接参数", "外观与样式", "悬浮窗行为"],
+  );
+  assert.equal(
+    await page.locator(".settings .brand-subtitle").innerText(),
+    "用量面板",
+  );
+  assert.notEqual(
+    await page
+      .locator(".settings .brand-subtitle")
+      .evaluate((el) => getComputedStyle(el).display),
+    "none",
+  );
+  assert.equal(
+    await page.locator('[name="edgeAutoCollapse"]').isChecked(),
+    true,
+  );
+  assert.equal(
+    await page.locator('[name="fullscreenAutoHide"]').isChecked(),
+    true,
+  );
+  assert.equal(await page.locator("#accent-color-picker").count(), 1);
   await page.screenshot({ path: ".cache/screenshots/settings.png" });
   await page.locator("[data-theme=dark]").click();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  await page.locator('[data-accent="#087f8c"]').click();
+  assert.equal(
+    await page.evaluate(() =>
+      document.documentElement.style.getPropertyValue("--accent-custom"),
+    ),
+    "#087f8c",
+  );
+  await page
+    .locator('[data-setting-section="appearance"]')
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({ path: ".cache/screenshots/settings-appearance.png" });
+  await page
+    .locator('[data-setting-section="behavior"]')
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
   await page
     .locator("#settings-form [name=endpoint]")
     .fill("https://keeper.example/usage");
@@ -202,6 +279,22 @@ try {
       () => window.__previewSavedSettings.value.displayHoldSeconds,
     ),
     6,
+  );
+  assert.equal(
+    await page.evaluate(() => window.__previewSavedSettings.value.accentColor),
+    "#087f8c",
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__previewSavedSettings.value.edgeAutoCollapse,
+    ),
+    true,
+  );
+  assert.equal(
+    await page.evaluate(
+      () => window.__previewSavedSettings.value.fullscreenAutoHide,
+    ),
+    true,
   );
   await page.evaluate(() => {
     window.__previewSaveError =
@@ -354,6 +447,61 @@ try {
         .locator(".table-wrap")
         .evaluate((el) => el.scrollWidth > el.clientWidth),
       "Request table scrolls as a unit",
+    );
+    assert.ok(
+      await page
+        .locator(".request-table-scroll")
+        .evaluate((el) => el.scrollWidth > el.clientWidth),
+      "Request table exposes its horizontal scrollbar above the rows",
+    );
+    assert.ok(
+      await page
+        .locator(".request-table-wrap")
+        .evaluate((el) => el.scrollHeight > el.clientHeight),
+      "Request rows scroll inside the table viewport",
+    );
+    assert.equal(
+      await page
+        .locator(".request-table-wrap th")
+        .first()
+        .evaluate((el) => getComputedStyle(el).position),
+      "sticky",
+    );
+    assert.ok(
+      await page
+        .locator(".panel-content")
+        .evaluate(
+          (el) =>
+            el.scrollHeight <= el.clientHeight + 1 &&
+            getComputedStyle(el).overflowY === "hidden",
+        ),
+      "Request view does not share the page-level vertical scroll",
+    );
+    assert.equal(
+      await page
+        .locator(".request-table-wrap th")
+        .allTextContents()
+        .then((items) => items[1]),
+      "sk",
+    );
+    assert.ok(
+      (
+        await page
+          .locator(".request-table-wrap tbody tr")
+          .first()
+          .locator("td")
+          .nth(1)
+          .innerText()
+      ).includes("sk-"),
+    );
+    await page.screenshot({ path: `.cache/screenshots/requests-${theme}.png` });
+    await page.locator(".request-table-scroll").evaluate((el) => {
+      el.scrollLeft = 180;
+      el.dispatchEvent(new Event("scroll"));
+    });
+    assert.equal(
+      await page.locator(".request-table-wrap").evaluate((el) => el.scrollLeft),
+      180,
     );
     assert.ok(
       await page
@@ -556,7 +704,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, five tabs, four account views, key/date filters, shared key scope, sk permissions, click entry, themes, empty/offline/long states settings with connection ERRLOG and explicit TLS bypass, native-size and docked-edge layouts, contrast, numeric overflow, DPI rendering, directional arrows and configurable display hold.",
+    "PASS: browser rendering, settings groups/title/theme palette/window behavior switches, quota efficiency semantics, compact latency samples, request sk column with top horizontal and internal vertical scrolling, five tabs, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
   );
 } finally {
   await browser?.close();

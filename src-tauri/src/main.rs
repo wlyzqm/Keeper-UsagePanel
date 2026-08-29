@@ -20,6 +20,13 @@ struct Scope {
     label: String,
     revision: u64,
 }
+fn valid_accent_color(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value.as_bytes()[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_hexdigit())
+}
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> settings::Settings {
     state.settings.lock().unwrap().clone()
@@ -43,6 +50,10 @@ async fn save_settings(
     }
     if !matches!(value.theme.as_str(), "light" | "dark") {
         value.theme = "light".into();
+    }
+    value.accent_color = value.accent_color.trim().to_ascii_lowercase();
+    if !value.accent_color.is_empty() && !valid_accent_color(&value.accent_color) {
+        return Err("主题色需为 #RRGGBB 格式".into());
     }
     {
         let old = state.settings.lock().unwrap();
@@ -85,11 +96,10 @@ async fn save_settings(
     drop(scope);
     drop(current);
     *state.settings.lock().unwrap() = value.clone();
+    windows::apply_behavior_settings(&app);
     let _ = app.emit("configured", json!({"settings":value,"revision":revision}));
     let _ = window.hide();
-    if let Some(w) = app.get_webview_window("widget") {
-        windows::show_inactive(&w);
-    }
+    windows::show_widget(&app);
     Ok(())
 }
 #[tauri::command]
@@ -294,9 +304,7 @@ fn widget_edge_state(state: State<AppState>) -> windows::WidgetEdgeState {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(w) = app.get_webview_window("widget") {
-                windows::show_inactive(&w);
-            }
+            windows::show_widget(app);
             windows::show_settings(app);
         }))
         .setup(|app| {
@@ -357,4 +365,18 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("无法启动 Keeper UsagePanel");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_accent_color;
+
+    #[test]
+    fn accent_color_accepts_only_complete_hex_colors() {
+        assert!(valid_accent_color("#1756a9"));
+        assert!(valid_accent_color("#ABCDEF"));
+        assert!(!valid_accent_color("#123"));
+        assert!(!valid_accent_color("1756a9"));
+        assert!(!valid_accent_color("#gggggg"));
+    }
 }
