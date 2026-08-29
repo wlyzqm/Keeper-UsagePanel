@@ -28,6 +28,23 @@ fn valid_accent_color(value: &str) -> bool {
             .iter()
             .all(|byte| byte.is_ascii_hexdigit())
 }
+fn same_connection(left: &settings::Settings, right: &settings::Settings) -> bool {
+    left.endpoint == right.endpoint
+        && left.auth_mode == right.auth_mode
+        && left.password == right.password
+        && left.proxy_url == right.proxy_url
+        && left.allow_private_http == right.allow_private_http
+        && left.allow_invalid_certificates == right.allow_invalid_certificates
+}
+pub(crate) fn quit(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(client) = app.state::<AppState>().client.read().await.clone() {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), client.logout()).await;
+        }
+        app.exit(0);
+    });
+}
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> settings::Settings {
     state.settings.lock().unwrap().clone()
@@ -56,18 +73,16 @@ async fn save_settings(
     if !value.accent_color.is_empty() && !valid_accent_color(&value.accent_color) {
         return Err("主题色需为 #RRGGBB 格式".into());
     }
+    let old_settings = state.settings.lock().unwrap().clone();
+    if value.password.is_empty()
+        && !clear_password
+        && value.auth_mode == old_settings.auth_mode
+        && value.endpoint.trim().trim_end_matches('/') == old_settings.endpoint
     {
-        let old = state.settings.lock().unwrap();
-        if value.password.is_empty()
-            && !clear_password
-            && value.auth_mode == old.auth_mode
-            && value.endpoint.trim().trim_end_matches('/') == old.endpoint
-        {
-            value.password = old.password.clone()
-        }
-        value.x = old.x;
-        value.y = old.y;
+        value.password = old_settings.password.clone()
     }
+    value.x = old_settings.x;
+    value.y = old_settings.y;
     value.proxy_url = value.proxy_url.trim().to_string();
     value.widget_font = value.widget_font.trim().to_string();
     if value.widget_font.is_empty() {
@@ -75,32 +90,47 @@ async fn save_settings(
     }
     value.endpoint = value.endpoint.trim().trim_end_matches('/').to_string();
     value.has_password = !value.password.is_empty();
-    let client = Arc::new(Keeper::connect_with_tls(
-        &value.endpoint,
-        &value.password,
-        value.allow_private_http,
-        &value.proxy_url,
-        value.auth_mode,
-        value.allow_invalid_certificates,
-    )?);
-    client.login().await?; // Verify before overwriting working credentials.
-    settings::save(&value)?;
-    let mut current = state.client.write().await;
-    let mut scope = state.scope.write().await;
-    *scope = Scope {
-        revision: scope.revision + 1,
-        ..Default::default()
+    let reconnect = !same_connection(&value, &old_settings) || state.client.read().await.is_none();
+    let client = if reconnect {
+        let client = Arc::new(Keeper::connect_with_tls(
+            &value.endpoint,
+            &value.password,
+            value.allow_private_http,
+            &value.proxy_url,
+            value.auth_mode,
+            value.allow_invalid_certificates,
+        )?);
+        client.login().await?; // Verify before overwriting working credentials.
+        Some(client)
+    } else {
+        None
     };
-    let revision = scope.revision;
-    *current = Some(client);
-    *state.last.lock().unwrap() = Value::Null;
-    drop(scope);
-    drop(current);
+    settings::save(&value)?;
+    let (revision, previous) = if let Some(client) = client {
+        let mut current = state.client.write().await;
+        let mut scope = state.scope.write().await;
+        *scope = Scope {
+            revision: scope.revision + 1,
+            ..Default::default()
+        };
+        let revision = scope.revision;
+        let previous = current.replace(client);
+        *state.last.lock().unwrap() = Value::Null;
+        (revision, previous)
+    } else {
+        (state.scope.read().await.revision, None)
+    };
     *state.settings.lock().unwrap() = value.clone();
     windows::apply_behavior_settings(&app);
-    let _ = app.emit("configured", json!({"settings":value,"revision":revision}));
+    let _ = app.emit(
+        "configured",
+        json!({"settings":value,"revision":revision,"connectionChanged":reconnect}),
+    );
     let _ = window.hide();
     windows::show_widget(&app);
+    if let Some(previous) = previous {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), previous.logout()).await;
+    }
     Ok(())
 }
 #[tauri::command]
@@ -292,7 +322,7 @@ fn window_action(
             }
         }
         "hide" => windows::hide(&app),
-        "quit" => app.exit(0),
+        "quit" => quit(&app),
         _ => return Err("未知窗口操作".into()),
     }
     Ok(())
@@ -357,7 +387,7 @@ fn main() {
             window_action,
             widget_edge_state,
             updates::pending_update,
-            updates::defer_update,
+            updates::check_update,
             updates::skip_update,
             updates::install_update
         ])
@@ -379,7 +409,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_accent_color;
+    use super::{same_connection, valid_accent_color};
+    use crate::settings::Settings;
 
     #[test]
     fn accent_color_accepts_only_complete_hex_colors() {
@@ -388,5 +419,21 @@ mod tests {
         assert!(!valid_accent_color("#123"));
         assert!(!valid_accent_color("1756a9"));
         assert!(!valid_accent_color("#gggggg"));
+    }
+
+    #[test]
+    fn only_connection_fields_require_a_new_keeper_session() {
+        let original = Settings {
+            endpoint: "https://keeper.example/usage".into(),
+            password: "secret".into(),
+            ..Default::default()
+        };
+        let mut appearance = original.clone();
+        appearance.theme = "dark".into();
+        appearance.poll_seconds = 15;
+        assert!(same_connection(&original, &appearance));
+        let mut changed = original.clone();
+        changed.proxy_url = "socks5://127.0.0.1:1080".into();
+        assert!(!same_connection(&original, &changed));
     }
 }

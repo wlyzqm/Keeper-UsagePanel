@@ -102,6 +102,30 @@ try {
     }
     await page.screenshot({ path: `.cache/screenshots/${tab}.png` });
   }
+  assert.equal(await page.locator(".account-overview-card").count(), 2);
+  assert.deepEqual(
+    await page.locator(".account-overview-card").evaluateAll((cards) =>
+      cards.map((card) => ({
+        quotas: card.querySelectorAll(".account-quota-line").length,
+        columns: getComputedStyle(
+          card.querySelector(".account-quota-lines"),
+        ).gridTemplateColumns.split(" ").length,
+      })),
+    ),
+    [
+      { quotas: 4, columns: 2 },
+      { quotas: 3, columns: 3 },
+    ],
+  );
+  await page.locator(".panel-content").evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await page.screenshot({ path: ".cache/screenshots/accounts-lower.png" });
+  await page.locator(".panel-content").evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await page.locator("[data-account-open]").first().click();
+  await page.locator(".account-breadcrumb").waitFor();
   for (const tab of ["quota-history", "requests", "errors"]) {
     await page.locator(`[data-pick=accountTab][data-value="${tab}"]`).click();
     await page.locator(".skeleton").first().waitFor({ state: "detached" });
@@ -111,6 +135,22 @@ try {
         .count(),
     );
     if (tab === "quota-history") {
+      assert.equal(await page.getByText("共享配额按真实周期统计").count(), 0);
+      assert.deepEqual(
+        await page.evaluate(() => {
+          const detailTabs = document.querySelector(".account-detail-tabs");
+          const quotaTabs = document.querySelector(".quota-role-tabs");
+          const title = document.querySelector(".group-title");
+          const detailRect = detailTabs.getBoundingClientRect();
+          const quotaRect = quotaTabs.getBoundingClientRect();
+          const titleRect = title.getBoundingClientRect();
+          return {
+            detailToQuota: Math.round(quotaRect.top - detailRect.bottom),
+            quotaToTitle: Math.round(titleRect.top - quotaRect.bottom),
+          };
+        }),
+        { detailToQuota: 2, quotaToTitle: 7 },
+      );
       assert.deepEqual(
         await page
           .locator(".data-table")
@@ -144,6 +184,50 @@ try {
           "区间总量 ÷ 实际下降百分点",
         ),
       );
+      const efficiencyTop = page.locator(".request-table-scroll");
+      const efficiencyBody = page.locator(".request-table-wrap");
+      assert.deepEqual(
+        await page.evaluate(() => {
+          const top = document.querySelector(".request-table-scroll");
+          const body = document.querySelector(".request-table-wrap");
+          return {
+            topHeight: top.getBoundingClientRect().height,
+            outerWidthsMatch:
+              Math.abs(
+                top.getBoundingClientRect().width -
+                  body.getBoundingClientRect().width,
+              ) <= 1,
+            scrollRangesMatch: (() => {
+              const previous = body.scrollLeft;
+              body.scrollLeft = Number.MAX_SAFE_INTEGER;
+              const bodyMaximum = body.scrollLeft;
+              body.scrollLeft = previous;
+              return Math.abs(Number(top.max) - bodyMaximum) <= 1;
+            })(),
+          };
+        }),
+        { topHeight: 12, outerWidthsMatch: true, scrollRangesMatch: true },
+      );
+      await page.screenshot({
+        path: ".cache/screenshots/quota-efficiency.png",
+      });
+      await efficiencyTop.evaluate((el) => {
+        el.value = el.max;
+        el.dispatchEvent(new Event("input"));
+      });
+      assert.equal(
+        await efficiencyBody.evaluate((el) => el.scrollLeft),
+        await efficiencyBody.evaluate((el) => {
+          const previous = el.scrollLeft;
+          el.scrollLeft = Number.MAX_SAFE_INTEGER;
+          const maximum = el.scrollLeft;
+          el.scrollLeft = previous;
+          return maximum;
+        }),
+      );
+      await page.screenshot({
+        path: ".cache/screenshots/quota-efficiency-right-edge.png",
+      });
     }
   }
   await page.goto("http://127.0.0.1:1420/?preview=1&theme=dark");
@@ -152,6 +236,8 @@ try {
   await page.goto("http://127.0.0.1:1420/?preview=1&state=long");
   await page.locator(".metric-value").first().waitFor();
   await page.locator("[data-tab=accounts]").click();
+  await page.locator(".skeleton").first().waitFor({ state: "detached" });
+  await page.locator("[data-account-open]").first().click();
   await page.locator(".skeleton").first().waitFor({ state: "detached" });
   await page.locator("[data-pick=accountTab][data-value=errors]").click();
   await page.locator(".skeleton").first().waitFor({ state: "detached" });
@@ -174,11 +260,11 @@ try {
   await page.locator("#settings-form").waitFor();
   assert.deepEqual(
     await page.locator(".setting-section > header h2").allTextContents(),
-    ["连接参数", "外观与样式", "悬浮窗行为"],
+    ["连接参数", "外观与样式", "悬浮窗行为", "版本与更新"],
   );
   assert.deepEqual(
     await page.locator("[data-settings-tab]").allTextContents(),
-    ["连接参数", "外观与样式", "悬浮窗行为"],
+    ["连接参数", "外观与样式", "悬浮窗行为", "版本与更新"],
   );
   assert.equal(await page.locator("[data-setting-section]:visible").count(), 1);
   assert.equal(
@@ -242,6 +328,13 @@ try {
   );
   await page.locator("[name=displayHoldSeconds]").fill("6");
   await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
+  await page.locator('[data-settings-tab="updates"]').click();
+  assert.ok(
+    (await page.locator("#update-center").innerText()).includes("0.5.1"),
+  );
+  await page.screenshot({ path: ".cache/screenshots/settings-updates.png" });
+  await page.locator('[data-action="check-update"]').click();
+  await page.getByText("检查完成，当前已是最新版本。").waitFor();
   await page.locator('[data-settings-tab="connection"]').click();
   await page
     .locator("#settings-form [name=endpoint]")
@@ -437,6 +530,31 @@ try {
       `${theme}: ${contrast}`,
     );
     await page.locator("[data-tab=accounts]").click();
+    await page.locator(".account-overview-card").first().waitFor();
+    assert.equal(await page.locator(".account-overview-card").count(), 2);
+    assert.deepEqual(
+      await page.locator(".accounts-summary .metric-label").allTextContents(),
+      ["累计 Token", "累计请求", "累计成功率", "累计缓存率"],
+    );
+    assert.equal(
+      await page.locator(".accounts-summary .metric-card p").count(),
+      0,
+    );
+    assert.deepEqual(
+      await page.locator(".account-overview-card").evaluateAll((cards) =>
+        cards.map((card) => ({
+          quotas: card.querySelectorAll(".account-quota-line").length,
+          columns: getComputedStyle(
+            card.querySelector(".account-quota-lines"),
+          ).gridTemplateColumns.split(" ").length,
+        })),
+      ),
+      [
+        { quotas: 4, columns: 2 },
+        { quotas: 3, columns: 3 },
+      ],
+    );
+    await page.locator("[data-account-open]").first().click();
     const quota = page.locator(".table-wrap").first();
     await quota.waitFor();
     await quota.scrollIntoViewIfNeeded();
@@ -471,8 +589,22 @@ try {
     assert.ok(
       await page
         .locator(".request-table-scroll")
-        .evaluate((el) => el.scrollWidth > el.clientWidth),
+        .evaluate((el) => Number(el.max) > 0),
       "Request table exposes its horizontal scrollbar above the rows",
+    );
+    assert.equal(
+      await page.evaluate(() => {
+        const top = document.querySelector(".request-table-scroll");
+        const body = document.querySelector(".request-table-wrap");
+        const topRect = top.getBoundingClientRect();
+        const bodyRect = body.getBoundingClientRect();
+        return (
+          Math.abs(topRect.left - bodyRect.left) <= 1 &&
+          Math.abs(topRect.right - bodyRect.right) <= 1
+        );
+      }),
+      true,
+      "Horizontal track fills the table outer width",
     );
     assert.ok(
       await page
@@ -530,8 +662,8 @@ try {
     );
     await page.screenshot({ path: `.cache/screenshots/requests-${theme}.png` });
     await page.locator(".request-table-scroll").evaluate((el) => {
-      el.scrollLeft = 180;
-      el.dispatchEvent(new Event("scroll"));
+      el.value = "180";
+      el.dispatchEvent(new Event("input"));
     });
     assert.equal(
       await page.locator(".request-table-wrap").evaluate((el) => el.scrollLeft),
@@ -543,7 +675,12 @@ try {
         .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
     );
   }
+  await page.setViewportSize({ width: 1024, height: 820 });
   await page.goto("http://127.0.0.1:1420/?preview=1&update=1");
+  await page.locator("#update-entry").waitFor();
+  assert.equal(await page.locator("#update-dialog").count(), 0);
+  await page.screenshot({ path: ".cache/screenshots/update-entry.png" });
+  await page.locator("#update-entry").click();
   await page.locator("#update-dialog").waitFor();
   assert.equal(
     await page.locator("#update-title").innerText(),
@@ -563,11 +700,9 @@ try {
   await page.screenshot({ path: ".cache/screenshots/update-portable.png" });
   await page.locator('[data-update-action="later"]').click();
   await page.locator("#update-dialog").waitFor({ state: "detached" });
-  assert.equal(
-    await page.evaluate(() => window.__previewUpdateAction),
-    "defer_update",
-  );
+  assert.equal(await page.locator("#update-entry").isVisible(), true);
   await page.goto("http://127.0.0.1:1420/?preview=1&update=1&installed=1");
+  await page.locator("#update-entry").click();
   await page.locator("#update-dialog").waitFor();
   assert.ok(
     (await page.locator(".update-mode").innerText()).includes("安装版"),
@@ -578,6 +713,27 @@ try {
     await page.evaluate(() => window.__previewUpdateAction),
     "skip_update",
   );
+  await page.goto("http://127.0.0.1:1420/?preview=1&cost=partial");
+  await page.locator("[data-tab=analysis]").click();
+  await page.locator(".cost-coverage").waitFor();
+  assert.ok(
+    (await page.locator(".cost-coverage").innerText()).includes("部分计价"),
+  );
+  assert.ok(
+    (await page.locator(".metric-label").first().innerText()).includes(
+      "已计价",
+    ),
+  );
+  await page.screenshot({ path: ".cache/screenshots/cost-partial.png" });
+  await page.goto("http://127.0.0.1:1420/?preview=1&cost=none");
+  await page.locator(".metric-value").first().waitFor();
+  assert.equal(await page.locator("[data-tab=analysis]").count(), 0);
+  assert.deepEqual(await page.locator(".metric-label").allTextContents(), [
+    "Token 总量",
+    "请求总数",
+    "缓存读取率",
+  ]);
+  await page.screenshot({ path: ".cache/screenshots/cost-none.png" });
   // Controlled preview delivery checks that smoothing affects the widget only.
   await page.goto("http://127.0.0.1:1420/?preview=1&manual");
   await page.locator(".metric-value").first().waitFor();
@@ -773,7 +929,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, paged settings/title/theme palette/window behavior switches, quota efficiency semantics, compact latency samples, alias-only sk cells, top horizontal and internal vertical request scrolling, portable update prompt/actions, five tabs, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
+    "PASS: browser rendering, four-section settings and manual update, passive update entry, complete/partial costs with the all-unpriced panel hidden, all-account summary, three- and four-quota card layouts, compact account detail, full-width synchronized request/quota-efficiency sliders, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
   );
 } finally {
   await browser?.close();

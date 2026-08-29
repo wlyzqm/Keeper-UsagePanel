@@ -35,7 +35,6 @@ pub struct Hover {
     dock: Option<Dock>,
     fullscreen_hidden: bool,
     fullscreen_checked: Option<Instant>,
-    update_prompt: bool,
 }
 
 impl Hover {
@@ -130,14 +129,7 @@ fn rect_covers_display(rect: DisplayRect, display: DisplayRect, tolerance: i32) 
         && rect.bottom >= display.bottom - tolerance
 }
 
-fn dock_strip_contains(
-    dock: Dock,
-    top: i32,
-    bottom: i32,
-    scale: f64,
-    x: f64,
-    y: f64,
-) -> bool {
+fn dock_strip_contains(dock: Dock, top: i32, bottom: i32, scale: f64, x: f64, y: f64) -> bool {
     let width = (EDGE_WIDGET_WIDTH * scale).round() as i32;
     let (left, right) = match dock.side {
         EdgeSide::Left => (dock.boundary, dock.boundary + width),
@@ -197,20 +189,8 @@ mod tests {
             right: 1920,
             bottom: 1080,
         };
-        assert!(edge_is_exposed(
-            &[primary],
-            EdgeSide::Left,
-            0,
-            200,
-            274
-        ));
-        assert!(edge_is_exposed(
-            &[primary],
-            EdgeSide::Right,
-            1920,
-            200,
-            274
-        ));
+        assert!(edge_is_exposed(&[primary], EdgeSide::Left, 0, 200, 274));
+        assert!(edge_is_exposed(&[primary], EdgeSide::Right, 1920, 200, 274));
 
         let right = DisplayRect {
             left: 1920,
@@ -272,22 +252,13 @@ mod tests {
             right: 1920,
             bottom: 1080,
         };
-        assert!(!edge_is_exposed(
-            &[display],
-            EdgeSide::Left,
-            48,
-            200,
-            274
-        ));
+        assert!(!edge_is_exposed(&[display], EdgeSide::Left, 48, 200, 274));
     }
 
     #[test]
     fn a_window_thrown_past_either_edge_still_docks() {
         assert_eq!(dock_side(-420, -204, 0, 1920, 32), Some(EdgeSide::Left));
-        assert_eq!(
-            dock_side(2200, 2416, 0, 1920, 32),
-            Some(EdgeSide::Right)
-        );
+        assert_eq!(dock_side(2200, 2416, 0, 1920, 32), Some(EdgeSide::Right));
         assert_eq!(dock_side(500, 716, 0, 1920, 32), None);
     }
 
@@ -398,7 +369,7 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
             "settings" => show_settings(app),
             "hide" => hide(app),
-            "quit" => app.exit(0),
+            "quit" => crate::quit(app),
             _ => {}
         })
         .build(app)?;
@@ -537,19 +508,6 @@ pub fn show_detail(app: &tauri::AppHandle) {
     let _ = panel.emit("detail-open", ());
 }
 
-pub fn set_update_prompt(app: &tauri::AppHandle, active: bool) {
-    app.state::<AppState>().hover.lock().unwrap().update_prompt = active;
-    if active
-        && app
-            .get_webview_window("widget")
-            .is_some_and(|widget| visible(&widget))
-        && !app
-            .get_webview_window("settings")
-            .is_some_and(|settings| visible(&settings))
-    {
-        show_detail(app);
-    }
-}
 fn work_area(window: &tauri::WebviewWindow) -> (i32, i32, i32, i32) {
     #[cfg(windows)]
     unsafe {
@@ -703,11 +661,7 @@ pub fn prepare_drag(app: &tauri::AppHandle, widget: &tauri::WebviewWindow) {
     }
 }
 
-fn dock_if_near(
-    app: &tauri::AppHandle,
-    widget: &tauri::WebviewWindow,
-    threshold_dip: f64,
-) -> bool {
+fn dock_if_near(app: &tauri::AppHandle, widget: &tauri::WebviewWindow, threshold_dip: f64) -> bool {
     let edge_auto_collapse = app
         .state::<AppState>()
         .settings
@@ -745,13 +699,7 @@ fn dock_if_near(
         };
         // An unavailable monitor list must never turn a multi-screen seam into a dock target.
         if !displays.is_empty()
-            && edge_is_exposed(
-                &displays,
-                side,
-                boundary,
-                y,
-                y + size.height as i32,
-            )
+            && edge_is_exposed(&displays, side, boundary, y, y + size.height as i32)
         {
             let full_width = (WIDGET_WIDTH * scale).round() as i32;
             let x = match side {
@@ -1031,9 +979,6 @@ pub fn track(app: tauri::AppHandle) {
             .get_webview_window("settings")
             .is_some_and(|w| foreground(&w))
         {
-            continue;
-        }
-        if state.hover.lock().unwrap().update_prompt {
             continue;
         }
         // Do not hold the hover mutex across calls dispatched to the UI thread.

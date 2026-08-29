@@ -1,4 +1,4 @@
-use crate::{settings, windows, AppState};
+use crate::{settings, AppState};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -8,10 +8,10 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, Manager, State, WebviewWindow};
+use tokio::sync::Mutex as AsyncMutex;
 
-const RELEASE_API: &str =
-    "https://api.github.com/repos/wlyzqm/Keeper-UsagePanel/releases/latest";
+const RELEASE_API: &str = "https://api.github.com/repos/wlyzqm/Keeper-UsagePanel/releases/latest";
 const USER_AGENT: &str = "Keeper-UsagePanel-Updater";
 
 #[derive(Clone, serde::Serialize)]
@@ -33,7 +33,7 @@ struct Candidate {
 #[derive(Default)]
 pub struct UpdateState {
     candidate: Mutex<Option<Candidate>>,
-    deferred: Mutex<bool>,
+    checking: AsyncMutex<()>,
 }
 
 #[derive(Deserialize)]
@@ -95,7 +95,10 @@ fn checksum_for(checksums: &str, asset_name: &str) -> Option<String> {
     })
 }
 
-async fn fetch_candidate(config: &settings::Settings) -> Result<Option<Candidate>, String> {
+async fn fetch_candidate(
+    config: &settings::Settings,
+    respect_skipped_version: bool,
+) -> Result<Option<Candidate>, String> {
     let (http, _) = keeper_core::configured_http_client(
         &config.proxy_url,
         config.allow_invalid_certificates,
@@ -117,7 +120,9 @@ async fn fetch_candidate(config: &settings::Settings) -> Result<Option<Candidate
         .await
         .map_err(|error| format!("无法解析 GitHub Release：{error}"))?;
     let version = release.tag_name.trim_start_matches('v').to_string();
-    if !newer_than_current(&version) || config.skipped_update_version == version {
+    if !newer_than_current(&version)
+        || respect_skipped_version && config.skipped_update_version == version
+    {
         return Ok(None);
     }
     let portable = portable_mode();
@@ -165,37 +170,30 @@ async fn fetch_candidate(config: &settings::Settings) -> Result<Option<Candidate
     }))
 }
 
-async fn check(app: &tauri::AppHandle) -> Result<(), String> {
-    let config = app.state::<AppState>().settings.lock().unwrap().clone();
-    let candidate = fetch_candidate(&config).await?;
+async fn check(
+    app: &tauri::AppHandle,
+    respect_skipped_version: bool,
+) -> Result<Option<UpdateInfo>, String> {
     let updates = app.state::<UpdateState>();
+    let _checking = updates.checking.lock().await;
+    let config = app.state::<AppState>().settings.lock().unwrap().clone();
+    let candidate = fetch_candidate(&config, respect_skipped_version).await?;
+    let info = candidate.as_ref().map(|candidate| candidate.info.clone());
     *updates.candidate.lock().unwrap() = candidate.clone();
-    *updates.deferred.lock().unwrap() = false;
-    if let Some(candidate) = candidate {
-        windows::set_update_prompt(app, true);
-        app.emit("update-available", candidate.info)
-            .map_err(|error| format!("无法显示更新提示：{error}"))?;
-    } else {
-        windows::set_update_prompt(app, false);
-    }
-    Ok(())
+    app.emit("update-status", info.clone())
+        .map_err(|error| format!("无法更新版本状态：{error}"))?;
+    Ok(info)
 }
 
 pub fn track(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(12)).await;
-        loop {
-            let _ = check(&app).await;
-            tokio::time::sleep(Duration::from_secs(60 * 60)).await;
-        }
+        let _ = check(&app, true).await;
     });
 }
 
 #[tauri::command]
 pub fn pending_update(updates: State<'_, UpdateState>) -> Option<UpdateInfo> {
-    if *updates.deferred.lock().unwrap() {
-        return None;
-    }
     updates
         .candidate
         .lock()
@@ -205,10 +203,14 @@ pub fn pending_update(updates: State<'_, UpdateState>) -> Option<UpdateInfo> {
 }
 
 #[tauri::command]
-pub fn defer_update(app: tauri::AppHandle, updates: State<'_, UpdateState>) {
-    *updates.deferred.lock().unwrap() = true;
-    windows::set_update_prompt(&app, false);
-    let _ = app.emit("update-dismissed", ());
+pub async fn check_update(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+) -> Result<Option<UpdateInfo>, String> {
+    if !matches!(window.label(), "detail" | "settings") {
+        return Err("请在面板或设置中检查更新".into());
+    }
+    check(&app, false).await
 }
 
 #[tauri::command]
@@ -230,8 +232,7 @@ pub fn skip_update(
         settings::save(&config)?;
     }
     *updates.candidate.lock().unwrap() = None;
-    windows::set_update_prompt(&app, false);
-    let _ = app.emit("update-dismissed", ());
+    let _ = app.emit("update-status", Option::<UpdateInfo>::None);
     Ok(())
 }
 
@@ -270,7 +271,10 @@ pub async fn install_update(
     if !response.status().is_success() {
         return Err(format!("更新下载返回 HTTP {}", response.status()));
     }
-    if response.content_length().is_some_and(|size| size > 200 * 1024 * 1024) {
+    if response
+        .content_length()
+        .is_some_and(|size| size > 200 * 1024 * 1024)
+    {
         return Err("更新文件超过 200 MB，已停止下载".into());
     }
     let bytes = response
@@ -282,11 +286,7 @@ pub async fn install_update(
         return Err("更新文件 SHA-256 校验失败，未执行更新".into());
     }
     let current = std::env::current_exe().map_err(|_| "无法定位当前程序")?;
-    let artifact = downloaded_path(
-        &candidate.info.version,
-        candidate.info.portable,
-        &current,
-    );
+    let artifact = downloaded_path(&candidate.info.version, candidate.info.portable, &current);
     std::fs::write(&artifact, &bytes).map_err(|_| "无法写入临时更新文件")?;
     let helper = std::env::temp_dir().join(format!(
         "KeeperUsagePanel-update-helper-{}.exe",
@@ -311,8 +311,10 @@ pub async fn install_update(
         command.creation_flags(0x08000000);
     }
     command.spawn().map_err(|_| "无法启动更新助手")?;
-    windows::set_update_prompt(&app, false);
-    let _ = app.emit("update-dismissed", ());
+    let _ = app.emit("update-status", Option::<UpdateInfo>::None);
+    if let Some(client) = state.client.read().await.clone() {
+        let _ = tokio::time::timeout(Duration::from_secs(1), client.logout()).await;
+    }
     app.exit(0);
     Ok(())
 }
@@ -338,7 +340,11 @@ fn wait_for_parent(_: u32) {
 }
 
 fn apply_update_helper(args: &[OsString]) {
-    let Some(pid) = args.get(2).and_then(|value| value.to_str()).and_then(|value| value.parse().ok()) else {
+    let Some(pid) = args
+        .get(2)
+        .and_then(|value| value.to_str())
+        .and_then(|value| value.parse().ok())
+    else {
         return;
     };
     let Some(mode) = args.get(3).and_then(|value| value.to_str()) else {

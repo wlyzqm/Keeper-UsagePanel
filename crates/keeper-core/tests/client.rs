@@ -148,15 +148,18 @@ async fn readonly_account_quota_and_request_routes() {
         (204, json!(null)),
         (
             200,
-            json!({"identities":[{"id":"a1","identity":"auth/index","type":"codex"}]}),
+            json!({"total_pages":2,"total_count":2,"identities":[{"id":"a1","identity":"auth/index","type":"codex"}]}),
         ),
+        (200, json!({"total_pages":2,"total_count":2,"identities":[{"id":"a2","identity":"other/index","type":"codex"}]})),
+        (200, json!({"items":[]})),
         (200, json!({"items":[]})),
         (200, json!({"cycles":[]})),
         (200, json!({"events":[]})),
     ])
     .await;
     let client = Keeper::new(&url, "", false).unwrap();
-    client.view("accounts", Query::default()).await.unwrap();
+    let accounts = client.view("accounts", Query::default()).await.unwrap();
+    assert_eq!(accounts["identities"].as_array().unwrap().len(), 2);
     let q = Query {
         account_id: "a1".into(),
         range: "today".into(),
@@ -168,10 +171,58 @@ async fn readonly_account_quota_and_request_routes() {
     client.view("requests", q).await.unwrap();
     task.await.unwrap();
     let requests = requests.lock().await;
-    assert!(requests[3].starts_with("POST /usage/api/v1/quota/cache "));
-    assert!(requests[3].contains("auth/index"));
-    assert!(requests[4].contains("quota/history/auth%2Findex"));
-    assert!(requests[5].contains("source=auth%2Findex"));
+    assert!(requests[2].contains("page_size=100&page=1"));
+    assert!(requests[3].contains("page_size=100&page=2"));
+    assert!(requests[4].starts_with("POST /usage/api/v1/quota/cache "));
+    assert!(requests[4].contains("auth/index"));
+    assert!(requests[4].contains("other/index"));
+    assert!(requests[5].starts_with("POST /usage/api/v1/quota/cache "));
+    assert!(requests[6].contains("quota/history/auth%2Findex"));
+    assert!(requests[7].contains("source=auth%2Findex"));
+    assert!(requests.iter().all(|request| request
+        .to_lowercase()
+        .contains("user-agent: keeper-usagepanel_0.5.1 admin")));
+}
+
+#[tokio::test]
+async fn summary_reports_partial_and_missing_cost_coverage() {
+    for (models, priced, unpriced) in [
+        (
+            json!([
+                {"model":"priced","requests":1,"total_tokens":10,"cost_available":true},
+                {"model":"unpriced","requests":1,"total_tokens":20,"cost_available":false}
+            ]),
+            1,
+            1,
+        ),
+        (
+            json!([
+                {"model":"unpriced-a","requests":1,"total_tokens":10,"cost_available":false},
+                {"model":"unpriced-b","requests":1,"total_tokens":20,"cost_available":false}
+            ]),
+            0,
+            2,
+        ),
+    ] {
+        let (url, _, task) = server(vec![
+            (204, json!(null)),
+            (200, json!({"usage":{"total_tokens":30},"summary":{"total_cost":1.25,"cost_available":false}})),
+            (200, json!({"cost_breakdown":{"total_cost_usd":1.25,"cost_available":false},"model_efficiency":models})),
+        ])
+        .await;
+        let client = Keeper::new(&url, "", false).unwrap();
+        let summary = client.view("summary", Query::default()).await.unwrap();
+        assert_eq!(summary["cost_coverage"]["priced_models"], priced);
+        assert_eq!(
+            summary["cost_coverage"]["unpriced_models"]
+                .as_array()
+                .unwrap()
+                .len(),
+            unpriced
+        );
+        assert_eq!(summary["cost_coverage"]["complete"], false);
+        task.await.unwrap();
+    }
 }
 #[test]
 fn error_pages_report_only_matching_page_count() {
@@ -376,6 +427,9 @@ async fn sk_uses_only_own_endpoints_and_rejects_admin_views() {
     let requests = requests.lock().await;
     assert!(requests[0].starts_with("POST /usage/api/v1/auth/api-key-login "));
     assert!(requests[0].contains(r#""apiKey":"sk-fixture-only""#));
+    assert!(requests[0]
+        .to_lowercase()
+        .contains("user-agent: keeper-usagepanel_0.5.1 sk"));
     assert!(requests[1].contains("/auth/session "));
     assert!(requests[3].contains("key-activity?range=5h"));
     assert!(requests

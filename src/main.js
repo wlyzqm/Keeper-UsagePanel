@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { WidgetDeltaDisplay } from "./widget-state.js";
 import { icon } from "./icons.js";
+import { aggregateCostState, costCoverage } from "./cost-state.js";
 import {
   escape as e,
   number,
@@ -19,6 +20,7 @@ import {
 } from "./format.js";
 
 const search = new URLSearchParams(location.search);
+const APP_VERSION = __APP_VERSION__;
 const preview = import.meta.env.DEV && search.get("preview") === "1";
 const windowName = search.get("window") || "detail";
 let api = {
@@ -43,16 +45,19 @@ const state = {
   distribution: "model_composition",
   accounts: [],
   account: "",
-  accountPage: 1,
-  accountPages: 1,
   accountTab: "quota",
+  accountDetail: false,
+  quotaItems: [],
   cursor: "",
   role: "primary",
   generation: 0,
   visible: windowName === "detail",
   data: null,
   loading: false,
+  hideCostPanel: false,
   update: null,
+  checkingUpdate: false,
+  updateMessage: "",
 };
 const tabs = [
   ["summary", "总览", "overview"],
@@ -66,7 +71,11 @@ const availableTabs = () =>
     ? []
     : state.access.role === "api_key_viewer"
       ? tabs.filter(([id]) => id === "summary")
-      : tabs.filter(([id]) => id !== "accounts" || !state.key);
+      : tabs.filter(
+          ([id]) =>
+            (id !== "accounts" || !state.key) &&
+            (id !== "analysis" || !state.hideCostPanel),
+        );
 const scopeLabel = () =>
   state.access?.role === "api_key_viewer"
     ? state.access.api_key?.alias ||
@@ -169,8 +178,30 @@ const copyConnectionErrlog = async (button) => {
 const closeUpdateDialog = () => {
   $("#update-dialog")?.remove();
 };
+const renderUpdateEntry = () => {
+  const entry = $("#update-entry");
+  if (!entry) return;
+  entry.hidden = !state.update;
+  entry.title = state.update
+    ? `发现 ${state.update.version}，点击查看升级选项`
+    : "";
+};
+const updateCenterMarkup = () =>
+  state.update
+    ? `<div class="update-center-status available"><span><strong>有新版本 ${e(state.update.version)}</strong><small>已在本次启动时检测，可由你决定何时升级。</small></span><button type="button" class="small-button" data-action="open-update">查看升级选项</button></div>`
+    : `<div class="update-center-status"><span><strong>${state.checkingUpdate ? "正在检查更新…" : `当前已安装 ${e(APP_VERSION)}`}</strong><small>${state.checkingUpdate ? "正在读取 GitHub Release。" : e(state.updateMessage || "自动检查仅在每次应用启动时执行一次。")}</small></span><button type="button" class="small-button" data-action="check-update" ${state.checkingUpdate ? "disabled" : ""}>立即检查更新</button></div>`;
+const renderUpdateCenter = () => {
+  const center = $("#update-center");
+  if (!center) return;
+  center.innerHTML = updateCenterMarkup();
+};
+const setUpdate = (info) => {
+  state.update = info || null;
+  renderUpdateEntry();
+  renderUpdateCenter();
+};
 const showUpdateDialog = (info) => {
-  state.update = info;
+  setUpdate(info);
   if (windowName === "widget") return;
   closeUpdateDialog();
   root.insertAdjacentHTML(
@@ -179,10 +210,8 @@ const showUpdateDialog = (info) => {
   );
   $("[data-update-action=install]")?.focus();
 };
-const deferUpdate = async () => {
+const deferUpdate = () => {
   closeUpdateDialog();
-  state.update = null;
-  await api.call("defer_update").catch(console.error);
 };
 const button = (name, title) =>
   `<button class="icon-button" data-action="${name}" title="${title}" aria-label="${title}">${icon(name === "close-detail" || name === "close-settings" ? "close" : name)}</button>`;
@@ -209,9 +238,9 @@ const table = (headers, items, kinds = [], extraClass = "") =>
         )
         .join("")}</tbody></table></div>`
     : `<div class="rows-card empty-inline">此范围暂无记录</div>`;
-const requestTable = (headers, items, kinds) =>
+const requestTable = (headers, items, kinds, label = "请求明细") =>
   items.length
-    ? `<div class="request-table-frame"><div class="request-table-scroll" tabindex="0" role="region" aria-label="请求明细横向滚动条"><div class="request-table-scroll-width"></div></div>${table(headers, items, kinds, "request-table-wrap")}</div>`
+    ? `<div class="request-table-frame ${label === "额度变化效率" ? "efficiency-table-frame" : ""}"><input class="request-table-scroll" type="range" min="0" max="0" value="0" aria-label="${e(label)}横向滚动条">${table(headers, items, kinds, "request-table-wrap")}</div>`
     : `<div class="rows-card empty-inline">此范围暂无记录</div>`;
 const requestKeyAlias = (value) => {
   const alias = String(value || "").trim();
@@ -238,7 +267,7 @@ function applyWidgetEdge(next = {}) {
   else delete wrap.dataset.edge;
 }
 function panel() {
-  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div><div class="header-actions"><button class="console-button" data-console="usage" title="在默认浏览器打开配置的 Keeper 地址">用量控制台</button><button class="console-button" data-console="cpa" id="cpa-console" disabled title="连接后获取 CPA 地址">CPA 控制台</button><button class="settings-button" data-action="settings">设置</button></div>${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
+  return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><button type="button" class="update-entry" id="update-entry" data-action="open-update" hidden>有新版本</button><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div><div class="header-actions"><button class="console-button" data-console="usage" title="在默认浏览器打开配置的 Keeper 地址">用量控制台</button><button class="console-button" data-console="cpa" id="cpa-console" disabled title="连接后获取 CPA 地址">CPA 控制台</button><button class="settings-button" data-action="settings">设置</button></div>${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
     .map(
       ([id, label, i]) =>
         `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`,
@@ -247,8 +276,25 @@ function panel() {
       "",
     )}</nav></header><div id="connection-banner" hidden></div><section class="panel-content" id="content" aria-live="polite"></section><footer class="panel-footer"><span class="footer-lock">${icon("shield")}只读 · 北京时间</span><button data-action="refresh" id="updated-at">${icon("refresh")}等待采样</button></footer></main></div>`;
 }
+function renderTabs() {
+  const nav = $(".tabs");
+  if (!nav) return;
+  nav.innerHTML = availableTabs()
+    .map(
+      ([id, label, i]) =>
+        `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`,
+    )
+    .join("");
+}
 function renderFilters() {
   if (!$("#filters")) return;
+  if (
+    state.tab === "accounts" &&
+    (!state.accountDetail || !["requests", "errors"].includes(state.accountTab))
+  ) {
+    $("#filters").innerHTML = "";
+    return;
+  }
   const more = !["today", "7d", "30d"].includes(state.range);
   $("#filters").innerHTML =
     `<div class="filter-row"><div class="segments">${["today", "7d", "30d"].map((r) => `<button class="${r === state.range ? "active" : ""}" data-pick="range" data-value="${r}">${ranges[r]}</button>`).join("")}</div>${picker(
@@ -263,34 +309,66 @@ function renderFilters() {
     )}${state.access?.role === "admin" ? picker("key", scopeLabel(), [["", "全部 Key"], ...state.keys.map((k) => [k.id, k.label])], state.key, "filters-key") : `<span class="viewer-scope" title="${e(scopeLabel())}">${icon("key")}<span>${e(scopeLabel())}</span></span>`}</div>${state.range === "custom" ? `<div class="custom-range"><input aria-label="开始日期" id="range-start" type="date" value="${e(state.start)}"><span class="muted">至</span><input aria-label="结束日期" id="range-end" type="date" value="${e(state.end)}"><button class="small-button" data-action="apply-range">应用</button></div>` : ""}`;
 }
 function scope() {
-  return `<div class="section-top"><h2>${state.tab === "summary" ? "用量概览" : state.tab === "analysis" ? "成本拆分" : state.tab === "latency" ? "延迟诊断" : state.tab === "distribution" ? "用量分布" : "认证账户"}</h2><span class="scope-tag" title="${e(scopeLabel())}">${e(ranges[state.range])} · ${e(scopeLabel())}</span></div>`;
+  const accountOverview = state.tab === "accounts" && !state.accountDetail;
+  return `<div class="section-top"><h2>${state.tab === "summary" ? "用量概览" : state.tab === "analysis" ? "成本拆分" : state.tab === "latency" ? "延迟诊断" : state.tab === "distribution" ? "用量分布" : accountOverview ? "认证账户" : "账户详情"}</h2>${accountOverview ? `<span class="scope-tag">实时总览</span>` : `<span class="scope-tag" title="${e(scopeLabel())}">${e(ranges[state.range])} · ${e(scopeLabel())}</span>`}</div>`;
 }
 function empty(title, text, retry = true) {
   return `<div class="empty"><div class="empty-icon">${icon("link")}</div><h2>${e(title)}</h2><p>${e(text)}</p>${retry ? '<button class="small-button" data-action="refresh">重新读取</button>' : ""}</div>`;
 }
+const summaryCostCoverage = (value = {}) => ({
+  totalModels: Number(value.total_models || 0),
+  pricedModels: Number(value.priced_models || 0),
+  unpricedModels: value.unpriced_models || [],
+  complete: value.complete === true,
+});
+const costMetric = (source, key, coverage, label, hint = "") => {
+  const result = aggregateCostState(source, key, coverage);
+  if (result.state === "complete")
+    return [
+      label,
+      money(result.value, true),
+      hint,
+      label === "总成本" ? "cost" : "",
+    ];
+  if (result.state === "partial")
+    return [
+      label === "总成本" ? "已计价成本" : `已计价${label}`,
+      money(result.value, true),
+      `${coverage.unpricedModels.length} 个模型未计价`,
+      label === "总成本" ? "cost" : "",
+    ];
+  return [
+    label,
+    "未计价",
+    "使用的模型均未配置价格",
+    label === "总成本" ? "cost" : "",
+  ];
+};
 function summary(data) {
   const usage = data.overview?.usage || {},
     sum = data.overview?.summary || {},
-    a = data.activity || {};
+    a = data.activity || {},
+    coverage = summaryCostCoverage(data.cost_coverage),
+    metrics = [
+      ["Token 总量", compact(usage.total_tokens), number(usage.total_tokens)],
+      [
+        "请求总数",
+        number(usage.total_requests),
+        `成功率 ${percent(usage.success_count, usage.total_requests)}`,
+      ],
+      [
+        "缓存读取率",
+        percent(sum.cache_read_tokens, sum.input_tokens),
+        "缓存读 / 输入",
+      ],
+    ];
+  if (!state.hideCostPanel)
+    metrics.push(
+      costMetric(sum, "total_cost", coverage, "总成本", "API 等价估算"),
+    );
   return (
     scope() +
-    cards(
-      [
-        ["Token 总量", compact(usage.total_tokens), number(usage.total_tokens)],
-        [
-          "请求总数",
-          number(usage.total_requests),
-          `成功率 ${percent(usage.success_count, usage.total_requests)}`,
-        ],
-        [
-          "缓存读取率",
-          percent(sum.cache_read_tokens, sum.input_tokens),
-          "缓存读 / 输入",
-        ],
-        ["总成本", cost(sum, "total_cost"), "API 等价估算", "cost"],
-      ],
-      4,
-    ) +
+    cards(metrics, metrics.length) +
     heading("Token 组成", "子项不重复计入总量") +
     rows([
       ["输入 · 含缓存", number(a.input_tokens)],
@@ -320,14 +398,27 @@ function liveSummary() {
 }
 function costs(data) {
   const b = data.cost_breakdown || {};
+  const coverage = costCoverage(data.model_efficiency || []);
+  const coverageNote = coverage.complete
+    ? '<div class="cost-coverage complete">全部已用模型均已配置价格，以下为完整估算。</div>'
+    : coverage.pricedModels > 0
+      ? `<div class="cost-coverage partial"><strong>部分计价</strong><span>下列金额仅包含已配置价格的模型；未计价 ${coverage.unpricedModels.length} 个：${e(coverage.unpricedModels.join("、"))}</span></div>`
+      : `<div class="cost-coverage missing"><strong>未计价</strong><span>已用模型均未配置价格：${e(coverage.unpricedModels.join("、") || "请先在 Keeper 中设置模型成本")}</span></div>`;
   return (
     scope() +
+    coverageNote +
     cards([
-      ["总成本", cost(b, "total_cost_usd"), "API 等价估算", "cost"],
-      ["普通输入", cost(b, "uncached_input_cost_usd"), "不含缓存读 / 写"],
-      ["缓存读取", cost(b, "cache_read_cost_usd")],
-      ["缓存写入", cost(b, "cache_write_cost_usd")],
-      ["输出", cost(b, "output_cost_usd"), "包含推理输出"],
+      costMetric(b, "total_cost_usd", coverage, "总成本", "API 等价估算"),
+      costMetric(
+        b,
+        "uncached_input_cost_usd",
+        coverage,
+        "普通输入",
+        "不含缓存读 / 写",
+      ),
+      costMetric(b, "cache_read_cost_usd", coverage, "缓存读取"),
+      costMetric(b, "cache_write_cost_usd", coverage, "缓存写入"),
+      costMetric(b, "output_cost_usd", coverage, "输出", "包含推理输出"),
     ]) +
     heading("模型效率") +
     table(
@@ -340,7 +431,9 @@ function costs(data) {
         percent(m.cache_read_tokens, m.input_tokens),
       ]),
     ) +
-    note("成本按 Keeper 价格配置估算，不等于订阅实际扣费。缺少价格显示 —。")
+    note(
+      "成本按 Keeper 价格配置估算，不等于订阅实际扣费。部分计价时，金额不包含未配置价格的模型。",
+    )
   );
 }
 function latency(data) {
@@ -483,7 +576,7 @@ function accountBody(account, data) {
     );
   }
   if (state.accountTab === "quota-history") {
-    const roles = `<div class="subnav">${[
+    const roles = `<div class="subnav quota-role-tabs">${[
       ["primary", "主额度"],
       ["secondary", "次额度"],
     ]
@@ -497,9 +590,6 @@ function accountBody(account, data) {
     const cycles = data.cycles || [];
     return (
       roles +
-      note(
-        "共享配额按真实周期统计，显示近 30 天已有观测，不按日期 / Key 拆分。",
-      ) +
       heading("额度周期") +
       table(
         ["状态", "开始 / 重置", "初始 / 最近剩余", "请求", "Token", "成本"],
@@ -514,7 +604,7 @@ function accountBody(account, data) {
         ["text", "time", "text", "number", "number", "number"],
       ) +
       heading("额度变化效率") +
-      table(
+      requestTable(
         [
           "观察结束",
           "额度变化",
@@ -541,6 +631,7 @@ function accountBody(account, data) {
             ];
           }),
         ["time", "text", "number", "number", "number", "number", "number"],
+        "额度变化效率",
       ) +
       note(
         "每百分点值 = 区间总量 ÷ 实际下降百分点；下降 1 个百分点时，两列数值相同。成本按同一区间动态计价后再除以下降百分点，缺少任一定价时显示 —。",
@@ -549,8 +640,7 @@ function accountBody(account, data) {
   }
   if (state.accountTab === "requests")
     return (
-      note("按所选日期、Key 与当前账户筛选，不读取原始请求正文。") +
-      heading("请求明细", "横向滚动查看完整指标") +
+      heading("请求明细", "按所选日期筛选 · 横向滚动查看完整指标") +
       requestTable(
         [
           "时间（北京）",
@@ -605,7 +695,125 @@ function accountBody(account, data) {
     note(data.scope_notice || "只显示本页条数，不代表日期范围总数。")
   );
 }
+const accountLabel = (account) =>
+  account.displayName || account.name || account.identity || "未命名账户";
+const quotaItemsByAccount = (accounts, items) => {
+  const map = new Map();
+  items.forEach((item, index) => {
+    const key = String(
+      item.auth_index ||
+        item.authIndex ||
+        item.identity ||
+        accounts[index]?.identity ||
+        "",
+    );
+    if (key) map.set(key, item);
+  });
+  return map;
+};
+const quotaUsage = (quota) => {
+  if (quota?.remainingFraction != null)
+    return Math.max(
+      0,
+      Math.min(100, (1 - Number(quota.remainingFraction)) * 100),
+    );
+  if (quota?.usedPercent != null)
+    return Math.max(0, Math.min(100, Number(quota.usedPercent)));
+  return null;
+};
+const healthBars = (health = {}) => {
+  const buckets = health.buckets || health.timeline || [];
+  if (!buckets.length) {
+    const success = Number(health.total_success || 0);
+    const failure = Number(health.total_failure || 0);
+    const healthy =
+      success + failure > 0 && failure / (success + failure) < 0.05;
+    return Array.from(
+      { length: 30 },
+      (_, index) =>
+        `<i class="${index < 26 ? (healthy ? "good" : "warn") : "idle"}"></i>`,
+    ).join("");
+  }
+  return buckets
+    .slice(-30)
+    .map((bucket) => {
+      const success = Number(bucket.success ?? bucket.success_count ?? 0);
+      const failure = Number(bucket.failure ?? bucket.failure_count ?? 0);
+      const total = success + failure;
+      return `<i class="${!total ? "idle" : failure / total >= 0.05 ? "warn" : "good"}"></i>`;
+    })
+    .join("");
+};
+function accountsOverview(data) {
+  const accounts = state.accounts;
+  if (!accounts.length)
+    return empty(
+      "暂无认证账户",
+      "这里只显示认证文件中的账户，不显示 API Key 身份。",
+      false,
+    );
+  const quotaMap = quotaItemsByAccount(accounts, state.quotaItems);
+  const success = accounts.reduce(
+    (total, account) => total + Number(account.success_count || 0),
+    0,
+  );
+  const failure = accounts.reduce(
+    (total, account) => total + Number(account.failure_count || 0),
+    0,
+  );
+  const totalTokens = accounts.reduce(
+    (total, account) => total + Number(account.total_tokens || 0),
+    0,
+  );
+  const totalRequests = accounts.reduce(
+    (total, account) => total + Number(account.total_requests || 0),
+    0,
+  );
+  const inputTokens = accounts.reduce(
+    (total, account) => total + Number(account.input_tokens || 0),
+    0,
+  );
+  const cacheReadTokens = accounts.reduce(
+    (total, account) => total + Number(account.cache_read_tokens || 0),
+    0,
+  );
+  return (
+    scope() +
+    '<div class="accounts-summary">' +
+    cards(
+      [
+        ["累计 Token", compact(totalTokens)],
+        ["累计请求", number(totalRequests)],
+        ["累计成功率", percent(success, success + failure)],
+        ["累计缓存率", percent(cacheReadTokens, inputTokens)],
+      ],
+      4,
+    ) +
+    "</div>" +
+    heading("账户状态", "点击账户查看额度历史、请求和错误") +
+    `<div class="account-overview">${accounts
+      .map((account) => {
+        const item = quotaMap.get(String(account.identity));
+        const quotas = item?.quota?.quota || [];
+        const health = account.credential_health || {};
+        const totalHealth =
+          Number(health.total_success || 0) + Number(health.total_failure || 0);
+        return `<article class="account-overview-card"><button type="button" data-account-open="${e(String(account.id))}" aria-label="查看 ${e(accountLabel(account))} 详情"><div class="account-card-header"><span class="account-avatar">${icon("accounts")}</span><span class="account-card-title"><strong title="${e(accountLabel(account))}">${e(accountLabel(account))}</strong><small>${e(account.provider || account.type || "认证账户")} · ${e(item?.quota?.subscription?.plan || "未识别套餐")}</small></span><span class="account-status ${account.disabled ? "disabled" : "enabled"}">${account.disabled ? "已禁用" : "已启用"}</span></div><div class="account-card-metrics"><span><small>请求</small><strong class="num">${compact(account.total_requests)}</strong></span><span><small>Token</small><strong class="num">${compact(account.total_tokens)}</strong></span><span><small>成功率</small><strong class="num">${percent(account.success_count, Number(account.success_count || 0) + Number(account.failure_count || 0))}</strong></span><span><small>缓存率</small><strong class="num">${percent(account.cache_read_tokens, account.input_tokens)}</strong></span></div><div class="account-quota-lines quota-count-${Math.min(quotas.length, 4)}">${
+          quotas.length
+            ? quotas
+                .map((quota) => {
+                  const used = quotaUsage(quota);
+                  return `<div class="account-quota-line"><span><small title="${e(quota.label || quota.key || "额度")}">${e(quota.label || quota.key || "额度")}</small><strong class="num">${used == null ? "—" : `${used.toFixed(0)}%`}</strong></span><b><i style="width:${used ?? 0}%" class="${used >= 80 ? "warn" : ""}"></i></b></div>`;
+                })
+                .join("")
+            : '<div class="account-quota-empty">暂无缓存额度</div>'
+        }</div><div class="account-health"><span>近 5 小时</span><div>${healthBars(health)}</div><strong class="num">${percent(Number(health.total_success || 0), totalHealth)}</strong></div><div class="account-card-open">查看账户详情 <span>→</span></div></button></article>`;
+      })
+      .join("")}</div>`
+  );
+}
 function accounts(data) {
+  if (!state.accountDetail) return accountsOverview(data);
   const account = state.accounts.find((a) => String(a.id) === state.account);
   if (!account)
     return empty(
@@ -615,14 +823,8 @@ function accounts(data) {
     );
   return (
     scope() +
-    `<div class="account-selector"><div class="account-avatar">${icon("accounts")}</div>${picker(
-      "account",
-      account.displayName || account.name || account.identity,
-      state.accounts.map((a) => [a.id, a.displayName || a.name || a.identity]),
-      state.account,
-    )}</div><div class="subnav">${accountTabs.map(([id, label]) => `<button data-pick="accountTab" data-value="${id}" class="${state.accountTab === id ? "active" : ""}">${label}</button>`).join("")}</div>` +
-    accountBody(account, data) +
-    `<div class="pagination">${state.accountPage > 1 ? '<button class="small-button" data-pick="accountPage" data-value="-1">上一页账户</button>' : ""}${state.accountPage < state.accountPages ? '<button class="small-button" data-pick="accountPage" data-value="1">下一页账户</button>' : ""}</div>`
+    `<div class="account-breadcrumb"><button type="button" data-action="accounts-back">← 返回账户总览</button><span>${e(accountLabel(account))}</span></div><div class="subnav account-detail-tabs">${accountTabs.map(([id, label]) => `<button data-pick="accountTab" data-value="${id}" class="${state.accountTab === id ? "active" : ""}">${label}</button>`).join("")}</div>` +
+    accountBody(account, data)
   );
 }
 function query() {
@@ -633,7 +835,6 @@ function query() {
     end: state.end,
     account_id: state.account,
     cursor: state.cursor,
-    page: state.accountPage,
     window_role: state.role,
   };
 }
@@ -642,7 +843,13 @@ function renderData() {
   const renders = { summary, analysis: costs, latency, distribution, accounts };
   const content = $("#content");
   const requestView =
-    state.tab === "accounts" && state.accountTab === "requests";
+    state.tab === "accounts" &&
+    state.accountDetail &&
+    ["requests", "quota-history"].includes(state.accountTab);
+  content.classList.toggle(
+    "account-detail-view",
+    state.tab === "accounts" && state.accountDetail,
+  );
   content.classList.toggle("request-view", requestView);
   content.innerHTML = renders[state.tab](state.data);
   if (requestView) setupRequestTableScroll();
@@ -650,19 +857,30 @@ function renderData() {
 
 function setupRequestTableScroll() {
   const top = $(".request-table-scroll");
-  const width = $(".request-table-scroll-width");
   const body = $(".request-table-wrap");
-  if (!top || !width || !body) return;
-  requestAnimationFrame(() => {
-    width.style.width = `${body.scrollWidth}px`;
-    top.scrollLeft = body.scrollLeft;
-  });
-  top.addEventListener("scroll", () => {
-    body.scrollLeft = top.scrollLeft;
+  if (!top || !body) return;
+  const syncGeometry = () => {
+    const previous = body.scrollLeft;
+    body.scrollLeft = Number.MAX_SAFE_INTEGER;
+    const bodyMaximum = body.scrollLeft;
+    body.scrollLeft = Math.min(previous, bodyMaximum);
+    const trackWidth = body.getBoundingClientRect().width;
+    top.style.width = `${trackWidth}px`;
+    top.max = String(bodyMaximum);
+    top.value = String(body.scrollLeft);
+    top.style.setProperty(
+      "--scroll-thumb",
+      `${Math.max(42, (body.clientWidth / body.scrollWidth) * trackWidth)}px`,
+    );
+  };
+  requestAnimationFrame(syncGeometry);
+  top.addEventListener("input", () => {
+    body.scrollLeft = Number(top.value);
   });
   body.addEventListener("scroll", () => {
-    top.scrollLeft = body.scrollLeft;
+    top.value = String(body.scrollLeft);
   });
+  new ResizeObserver(syncGeometry).observe(body);
 }
 async function load(background = false) {
   if (!$("#content") || !state.visible || !state.access) return;
@@ -690,18 +908,27 @@ async function load(background = false) {
       const result = await viewCall("accounts", query());
       if (gen !== state.generation) return;
       state.accounts = result.identities || [];
-      state.accountPages = result.total_pages || 1;
+      state.quotaItems = result.quota_items || [];
       if (!state.accounts.some((a) => String(a.id) === state.account)) {
         state.account = String(state.accounts[0]?.id ?? "");
         state.cursor = "";
       }
-      data = state.account ? await viewCall(state.accountTab, query()) : {};
+      data =
+        state.accountDetail && state.account
+          ? await viewCall(state.accountTab, query())
+          : result;
     } else
       data = await viewCall(
         state.tab === "distribution" ? "analysis" : state.tab,
         query(),
       );
     if (gen !== state.generation) return;
+    if (state.tab === "summary") {
+      const coverage = summaryCostCoverage(data.cost_coverage);
+      state.hideCostPanel =
+        coverage.totalModels > 0 && coverage.pricedModels === 0;
+      renderTabs();
+    }
     state.data = data;
     state.refreshedAt = Date.now();
     renderData();
@@ -791,6 +1018,7 @@ function settings() {
     ["connection", "连接参数"],
     ["appearance", "外观与样式"],
     ["behavior", "悬浮窗行为"],
+    ["updates", "版本与更新"],
   ]
     .map(
       ([id, label], index) =>
@@ -840,11 +1068,17 @@ function settings() {
     "刷新频率、数据展示与自动隐藏",
     `<div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label for="display-hold-seconds">非零数据保留 <span class="muted">/ 秒</span></label><input id="display-hold-seconds" name="displayHoldSeconds" type="number" min="0" max="300" value="${s.displayHoldSeconds ?? 16}" required></div><p class="field-hint setting-hint">连续收到零用量达到此时长后归零；设为 0 即立即归零。</p><label class="check-row setting-toggle"><input type="checkbox" name="edgeAutoCollapse" ${s.edgeAutoCollapse !== false ? "checked" : ""}><span><strong>贴近屏幕边缘自动收起</strong><small>拖到屏幕左右外沿时折叠，移入鼠标后展开。</small></span></label><label class="check-row setting-toggle"><input type="checkbox" name="fullscreenAutoHide" ${s.fullscreenAutoHide !== false ? "checked" : ""}><span><strong>全屏时自动隐藏悬浮窗</strong><small>游戏、视频或无边框全屏结束后自动恢复展示。</small></span></label><label class="check-row setting-toggle"><input type="checkbox" name="autoStart" ${s.autoStart ? "checked" : ""}><span><strong>登录 Windows 后启动</strong><small>随当前用户会话自动启动用量面板。</small></span></label>`,
   );
-  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><span class="spacer"></span><span class="eyebrow">设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><nav class="settings-tabs" role="tablist" aria-label="设置类别">${settingTabs}</nav><div class="settings-body">${connection}${appearance}${behavior}</div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form><section class="connection-error-dialog" id="connection-error-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-error-title" aria-describedby="connection-error-summary" hidden><div class="connection-error-card"><div class="error-dialog-kicker">CONNECTION / ERRLOG</div><h2 id="connection-error-title">Keeper 连接失败</h2><p id="connection-error-summary"></p><pre id="connection-errlog" tabindex="0"></pre><p class="error-dialog-hint">日志已隐藏登录凭据与代理认证信息，可直接复制用于排查。</p><div class="error-dialog-actions"><button type="button" data-error-action="close">返回设置</button><button type="button" class="copy-errlog" data-error-action="copy">复制 ERRLOG</button></div></div></section></main></div>`;
+  const updates = section(
+    "updates",
+    "版本与更新",
+    "每次启动自动检查一次，也可随时手动检查",
+    `<div class="update-center" id="update-center">${updateCenterMarkup()}</div><div class="rows-card update-details"><div class="metric-row"><span>当前版本</span><strong class="num">${e(APP_VERSION)}</strong></div><div class="metric-row"><span>自动检查频率</span><strong>每次启动一次</strong></div><div class="metric-row"><span>提醒方式</span><strong>面板入口，不弹窗打断</strong></div></div><div class="note">${icon("info")}<p>检测到新版本后只显示“有新版本”入口；点击后才会展示升级说明与安装选项。</p></div>`,
+  );
+  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><span class="spacer"></span><span class="eyebrow">设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><nav class="settings-tabs" role="tablist" aria-label="设置类别">${settingTabs}</nav><div class="settings-body">${connection}${appearance}${behavior}${updates}</div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form><section class="connection-error-dialog" id="connection-error-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-error-title" aria-describedby="connection-error-summary" hidden><div class="connection-error-card"><div class="error-dialog-kicker">CONNECTION / ERRLOG</div><h2 id="connection-error-title">Keeper 连接失败</h2><p id="connection-error-summary"></p><pre id="connection-errlog" tabindex="0"></pre><p class="error-dialog-hint">日志已隐藏登录凭据与代理认证信息，可直接复制用于排查。</p><div class="error-dialog-actions"><button type="button" data-error-action="close">返回设置</button><button type="button" class="copy-errlog" data-error-action="copy">复制 ERRLOG</button></div></div></section></main></div>`;
 }
 
 root.innerHTML = preview
-  ? `<div class="preview-stage ${search.has("standalone") ? "standalone" : ""} ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / 0.5　·　界面预览，示例数据</div></div>`
+  ? `<div class="preview-stage ${search.has("standalone") ? "standalone" : ""} ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / ${e(APP_VERSION)}　·　界面预览，示例数据</div></div>`
   : windowName === "widget"
     ? widget()
     : windowName === "settings"
@@ -864,7 +1098,7 @@ document.addEventListener("click", async (event) => {
   }
   if (b.dataset.updateAction) {
     if (b.dataset.updateAction === "later") {
-      await deferUpdate();
+      deferUpdate();
       return;
     }
     if (b.dataset.updateAction === "skip") {
@@ -873,7 +1107,7 @@ document.addEventListener("click", async (event) => {
         await api.call("skip_update");
         state.settings.skippedUpdateVersion = version;
         closeUpdateDialog();
-        state.update = null;
+        setUpdate(null);
       } catch (error) {
         $("#update-error").textContent = String(error);
       }
@@ -910,6 +1144,15 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
+  if (b.dataset.accountOpen) {
+    state.account = b.dataset.accountOpen;
+    state.accountDetail = true;
+    state.accountTab = "quota";
+    state.cursor = "";
+    renderFilters();
+    await load();
+    return;
+  }
   if ("accent" in b.dataset) {
     const accent = b.dataset.accent;
     state.settings.accentColor = accent;
@@ -939,14 +1182,38 @@ document.addEventListener("click", async (event) => {
   }
   if (b.dataset.action) {
     const name = b.dataset.action;
+    if (name === "open-update") {
+      if (state.update) showUpdateDialog(state.update);
+      return;
+    }
+    if (name === "check-update") {
+      state.checkingUpdate = true;
+      state.updateMessage = "";
+      renderUpdateCenter();
+      try {
+        const info = await api.call("check_update");
+        state.updateMessage = info ? "" : "检查完成，当前已是最新版本。";
+        setUpdate(info);
+      } catch (error) {
+        state.updateMessage = `检查失败：${String(error)}`;
+      } finally {
+        state.checkingUpdate = false;
+        renderUpdateCenter();
+      }
+      return;
+    }
+    if (name === "accounts-back") {
+      state.accountDetail = false;
+      state.cursor = "";
+      renderFilters();
+      await load();
+      return;
+    }
     if (
       (name === "close-detail" || name === "close-settings") &&
       $("#update-dialog")
-    ) {
-      await deferUpdate();
-      await action(name);
-      return;
-    }
+    )
+      deferUpdate();
     if (name === "refresh") {
       state.cursor = "";
       await load();
@@ -964,10 +1231,12 @@ document.addEventListener("click", async (event) => {
   }
   if (b.dataset.tab) {
     state.tab = b.dataset.tab;
+    if (state.tab === "accounts") state.accountDetail = false;
     state.cursor = "";
     document
       .querySelectorAll("[data-tab]")
       .forEach((el) => el.classList.toggle("active", el === b));
+    renderFilters();
     await load();
     return;
   }
@@ -995,10 +1264,7 @@ document.addEventListener("click", async (event) => {
       return;
     }
     state.cursor = pick === "cursor" ? value : "";
-    if (pick === "accountPage") {
-      state.accountPage += Number(value);
-      state.account = "";
-    } else state[pick] = value;
+    state[pick] = value;
     if (pick === "key" || pick === "range") {
       renderFilters();
       if (pick === "range" && value === "custom") return;
@@ -1007,6 +1273,7 @@ document.addEventListener("click", async (event) => {
       renderData();
       return;
     }
+    if (pick === "accountTab") renderFilters();
     await load();
   }
 });
@@ -1169,6 +1436,7 @@ function applyAccess(access) {
     state.sample = null;
     state.error = "";
     state.data = null;
+    state.hideCostPanel = false;
     state.cursor = "";
     state.accounts = [];
     state.account = "";
@@ -1177,14 +1445,7 @@ function applyAccess(access) {
       state.tab = "summary";
     updateSample();
   }
-  const nav = $(".tabs");
-  if (nav)
-    nav.innerHTML = availableTabs()
-      .map(
-        ([id, label, i]) =>
-          `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${icon(i)}${label}</button>`,
-      )
-      .join("");
+  renderTabs();
   const cpa = $("#cpa-console");
   if (cpa) {
     cpa.disabled = access.role !== "admin";
@@ -1217,44 +1478,44 @@ function acceptSample(s) {
   state.error = "";
   updateSample();
 }
-await api.on("configured", async ({ settings: s, revision }) => {
-  state.revision = revision;
-  state.epoch++;
-  state.generation++;
-  state.loading = false;
-  state.settings = s;
-  state.access = null;
-  state.sample = null;
-  state.error = "";
-  state.keys = [];
-  applySettings();
-  updateSample();
-  if (windowName !== "settings") {
-    if ($("#content")) $("#content").innerHTML = "";
-    if ($(".tabs")) $(".tabs").innerHTML = "";
-    if ($("#cpa-console")) $("#cpa-console").disabled = true;
-    try {
-      await refreshAccess();
-    } catch (error) {
-      state.error = String(error);
-      updateSample();
+await api.on(
+  "configured",
+  async ({ settings: s, revision, connectionChanged = true }) => {
+    state.settings = s;
+    applySettings();
+    if (!connectionChanged) return;
+    state.revision = revision;
+    state.epoch++;
+    state.generation++;
+    state.loading = false;
+    state.access = null;
+    state.sample = null;
+    state.error = "";
+    state.keys = [];
+    updateSample();
+    if (windowName !== "settings") {
+      if ($("#content")) $("#content").innerHTML = "";
+      if ($(".tabs")) $(".tabs").innerHTML = "";
+      if ($("#cpa-console")) $("#cpa-console").disabled = true;
+      try {
+        await refreshAccess();
+      } catch (error) {
+        state.error = String(error);
+        updateSample();
+      }
     }
-  }
-});
+  },
+);
 await api.on("settings-open", async () => {
   if (windowName === "settings") {
     state.settings = await api.call("get_settings");
     applySettings();
     root.innerHTML = settings();
-    if (state.update) showUpdateDialog(state.update);
+    renderUpdateCenter();
   }
 });
 if (windowName !== "widget") {
-  await api.on("update-available", showUpdateDialog);
-  await api.on("update-dismissed", () => {
-    closeUpdateDialog();
-    state.update = null;
-  });
+  await api.on("update-status", setUpdate);
 }
 if (windowName !== "settings") {
   await api.on("scope-changed", applyAccess);
@@ -1291,7 +1552,7 @@ try {
   }
   if (windowName !== "widget") {
     const update = await api.call("pending_update");
-    if (update) showUpdateDialog(update);
+    setUpdate(update);
   }
 } catch (error) {
   state.error = String(error);
@@ -1341,7 +1602,9 @@ if ($("#content"))
           state.tab === "summary"
             ? 10000
             : state.tab === "accounts"
-              ? 60000
+              ? state.accountDetail
+                ? 30000
+                : 15000
               : 30000;
       if (now - (state.refreshedAt || 0) >= interval) {
         state.refreshedAt = now;

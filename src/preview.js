@@ -14,7 +14,8 @@ export function createPreview(search) {
     (listeners.get(name) || []).forEach((fn) => fn(value));
   const empty = search.get("state") === "empty",
     offline = search.get("state") === "offline",
-    long = search.get("state") === "long";
+    long = search.get("state") === "long",
+    costMode = search.get("cost") || "complete";
   const stats = {
     total_tokens: empty ? 0 : 295139623,
     total_requests: empty ? 0 : 2493,
@@ -62,7 +63,32 @@ export function createPreview(search) {
     ...stats,
     ...activity,
     last_used_at: sample.sampled_at,
-    credential_health: { total_success: 324, total_failure: 3 },
+    credential_health: {
+      total_success: 324,
+      total_failure: 3,
+      buckets: Array.from({ length: 30 }, (_, index) => ({
+        success: index < 27 ? 10 : 0,
+        failure: index === 27 ? 1 : 0,
+      })),
+    },
+  };
+  const secondAccount = {
+    ...account,
+    id: "account-2",
+    identity: "auth-index-2",
+    name: "Team",
+    displayName: "团队账户 · Spark",
+    total_requests: 1184,
+    total_tokens: 126439082,
+    success_count: 1178,
+    failure_count: 6,
+    input_tokens: 118529330,
+    cache_read_tokens: 103452910,
+    credential_health: {
+      total_success: 298,
+      total_failure: 2,
+      buckets: Array.from({ length: 30 }, () => ({ success: 10, failure: 0 })),
+    },
   };
   const composition = [
     {
@@ -73,7 +99,7 @@ export function createPreview(search) {
       percent: 81.2,
       requests: 964,
       cost_usd: 16.923,
-      cost_available: true,
+      cost_available: costMode !== "none",
     },
     {
       label: "gpt-5.4-mini",
@@ -81,17 +107,18 @@ export function createPreview(search) {
       percent: 18.8,
       requests: 284,
       cost_usd: 1.702,
-      cost_available: true,
+      cost_available: costMode === "complete",
     },
   ];
   const analysis = {
     cost_breakdown: {
-      cost_available: true,
-      total_cost_usd: 42.8965,
-      uncached_input_cost_usd: 5.24,
-      cache_read_cost_usd: 1.68,
-      cache_write_cost_usd: 0.44,
-      output_cost_usd: 11.265,
+      cost_available: costMode === "complete",
+      total_cost_usd:
+        costMode === "none" ? 0 : costMode === "partial" ? 16.923 : 42.8965,
+      uncached_input_cost_usd: costMode === "none" ? 0 : 5.24,
+      cache_read_cost_usd: costMode === "none" ? 0 : 1.68,
+      cache_write_cost_usd: costMode === "none" ? 0 : 0.44,
+      output_cost_usd: costMode === "none" ? 0 : 9.563,
     },
     model_efficiency: composition.map((m) => ({
       ...m,
@@ -175,8 +202,22 @@ export function createPreview(search) {
               portable: search.get("installed") !== "1",
             }
           : null;
-      if (["defer_update", "skip_update", "install_update"].includes(command)) {
+      if (command === "check_update") {
+        const update = search.has("update")
+          ? {
+              version: "0.6.0",
+              notes: "- 新增自动更新\n- 优化便携版原位替换",
+              releaseUrl:
+                "https://github.com/wlyzqm/Keeper-UsagePanel/releases/tag/v0.6.0",
+              portable: search.get("installed") !== "1",
+            }
+          : null;
+        emit("update-status", update);
+        return update;
+      }
+      if (["skip_update", "install_update"].includes(command)) {
         window.__previewUpdateAction = command;
+        if (command === "skip_update") emit("update-status", null);
         return;
       }
       if (command === "last_sample") return offline ? null : sample;
@@ -226,11 +267,32 @@ export function createPreview(search) {
                 : stats,
               summary: {
                 ...activity,
-                total_cost: empty ? 0 : 42.8965,
-                cost_available: true,
+                total_cost:
+                  empty || costMode === "none"
+                    ? 0
+                    : costMode === "partial"
+                      ? 16.923
+                      : 42.8965,
+                cost_available: costMode === "complete",
               },
             },
             activity,
+            cost_coverage: {
+              total_models: empty ? 0 : 2,
+              priced_models:
+                empty || costMode === "none"
+                  ? 0
+                  : costMode === "partial"
+                    ? 1
+                    : 2,
+              unpriced_models:
+                costMode === "none"
+                  ? composition.map((model) => model.label)
+                  : costMode === "partial"
+                    ? [composition[1].label]
+                    : [],
+              complete: costMode === "complete",
+            },
           };
         case "analysis":
           return empty ? { cost_breakdown: {} } : analysis;
@@ -245,7 +307,59 @@ export function createPreview(search) {
                 max_latency_ms: 96200,
               };
         case "accounts":
-          return { identities: empty ? [] : [account], total_pages: 1 };
+          return {
+            identities: empty ? [] : [account, secondAccount],
+            total_count: empty ? 0 : 2,
+            quota_items: empty
+              ? []
+              : [account, secondAccount].map((entry, index) => ({
+                  auth_index: entry.identity,
+                  refreshed_at: sample.sampled_at,
+                  quota: {
+                    subscription: { plan: index ? "Pro 20x" : "Plus" },
+                    quota: index
+                      ? [
+                          {
+                            label: "GPT-5.3-Codex-Spark-5h",
+                            remainingFraction: 0.51,
+                            resetAt: sample.sampled_at,
+                          },
+                          {
+                            label: "GPT-5.3-Codex-Spark-Weekly",
+                            usedPercent: 64,
+                            resetAt: sample.sampled_at,
+                          },
+                          {
+                            label: "Weekly",
+                            usedPercent: 100,
+                            resetAt: sample.sampled_at,
+                          },
+                        ]
+                      : [
+                          {
+                            label: "GPT-5.3-Codex-5h",
+                            remainingFraction: 0.82,
+                            resetAt: sample.sampled_at,
+                          },
+                          {
+                            label: "GPT-5.3-Codex-Spark-5h",
+                            usedPercent: 34,
+                            resetAt: sample.sampled_at,
+                          },
+                          {
+                            label: "Weekly",
+                            usedPercent: 28,
+                            resetAt: sample.sampled_at,
+                          },
+                          {
+                            label: "GPT-5.3-Codex-Spark-Weekly",
+                            usedPercent: 7,
+                            resetAt: sample.sampled_at,
+                          },
+                        ],
+                  },
+                })),
+          };
         case "quota":
           return {
             items: [
@@ -255,8 +369,15 @@ export function createPreview(search) {
                   subscription: { plan: "Plus" },
                   quota: [
                     {
-                      label: "GPT-5.3-Codex-Spark-5h",
+                      label: "GPT-5.3-Codex-5h",
                       remainingFraction: 0.82,
+                      resetAt: sample.sampled_at,
+                      window_usage_tokens: 972610,
+                      window_usage_cost: 2.71,
+                    },
+                    {
+                      label: "GPT-5.3-Codex-Spark-5h",
+                      usedPercent: 34,
                       resetAt: sample.sampled_at,
                       window_usage_tokens: 1408230,
                       window_usage_cost: 4.38,
@@ -266,6 +387,13 @@ export function createPreview(search) {
                       usedPercent: 28,
                       window_usage_tokens: 564617884,
                       window_usage_cost: 89.9891,
+                      resetAt: sample.sampled_at,
+                    },
+                    {
+                      label: "GPT-5.3-Codex-Spark-Weekly",
+                      usedPercent: 7,
+                      window_usage_tokens: 8512741,
+                      window_usage_cost: 1.92,
                       resetAt: sample.sampled_at,
                     },
                   ],

@@ -198,6 +198,22 @@ pub fn configured_http_client(
     timeout_seconds: u64,
     redirect_limit: usize,
 ) -> Result<(Client, String), String> {
+    configured_http_client_with_user_agent(
+        proxy_url,
+        allow_invalid_certificates,
+        timeout_seconds,
+        redirect_limit,
+        None,
+    )
+}
+
+fn configured_http_client_with_user_agent(
+    proxy_url: &str,
+    allow_invalid_certificates: bool,
+    timeout_seconds: u64,
+    redirect_limit: usize,
+    user_agent: Option<&str>,
+) -> Result<(Client, String), String> {
     let redirect = if redirect_limit == 0 {
         reqwest::redirect::Policy::none()
     } else {
@@ -209,6 +225,9 @@ pub fn configured_http_client(
         .redirect(redirect)
         .danger_accept_invalid_certs(allow_invalid_certificates)
         .timeout(std::time::Duration::from_secs(timeout_seconds));
+    if let Some(user_agent) = user_agent {
+        builder = builder.user_agent(user_agent);
+    }
     let route = if !proxy_url.trim().is_empty() {
         let proxy = Url::parse(proxy_url.trim())
             .map_err(|_| "代理地址无效，请包含 http:// 或 socks5://")?;
@@ -271,8 +290,19 @@ impl Keeper {
             return Err("请输入 CPA API Key（sk）".into());
         }
         let base = validate_endpoint(endpoint, allow_http)?;
-        let (http, route) =
-            configured_http_client(proxy_url, allow_invalid_certificates, 25, 0)?;
+        let role = if auth_mode == AuthMode::ApiKey {
+            "sk"
+        } else {
+            "admin"
+        };
+        let user_agent = format!("Keeper-UsagePanel_{} {role}", env!("CARGO_PKG_VERSION"));
+        let (http, route) = configured_http_client_with_user_agent(
+            proxy_url,
+            allow_invalid_certificates,
+            25,
+            0,
+            Some(&user_agent),
+        )?;
         Ok(Self {
             http,
             base,
@@ -302,12 +332,7 @@ impl Keeper {
         }
         Ok(url)
     }
-    fn transport_error(
-        &self,
-        summary: &str,
-        stage: &str,
-        mut error: reqwest::Error,
-    ) -> String {
+    fn transport_error(&self, summary: &str, stage: &str, mut error: reqwest::Error) -> String {
         let target = error
             .url()
             .map(|url| {
@@ -527,16 +552,13 @@ impl Keeper {
             } else {
                 self.http.get(url)
             };
-            let response = request
-                .send()
-                .await
-                .map_err(|error| {
-                    self.transport_error(
-                        "连接超时或网络不可达，请检查 Keeper 地址与代理",
-                        &format!("api.{path}"),
-                        error,
-                    )
-                })?;
+            let response = request.send().await.map_err(|error| {
+                self.transport_error(
+                    "连接超时或网络不可达，请检查 Keeper 地址与代理",
+                    &format!("api.{path}"),
+                    error,
+                )
+            })?;
             if let Some(guard) = rate_guard.as_mut() {
                 **guard = Some(Instant::now());
             }
@@ -580,6 +602,21 @@ impl Keeper {
             }
         }
         let value = self.request(path, params, None).await?;
+        let mut cache = self.cache.lock().await;
+        if cache.len() > 32 {
+            cache.clear();
+        }
+        cache.insert(key, (Instant::now(), value.clone()));
+        Ok(value)
+    }
+    async fn cached_post(&self, path: &str, body: Value, ttl: u64) -> Result<Value, String> {
+        let key = format!("POST {} {}", self.url(path, &[])?, body);
+        if let Some((at, value)) = self.cache.lock().await.get(&key) {
+            if at.elapsed().as_secs() < ttl {
+                return Ok(value.clone());
+            }
+        }
+        let value = self.request(path, &[], Some(body)).await?;
         let mut cache = self.cache.lock().await;
         if cache.len() > 32 {
             cache.clear();
@@ -711,24 +748,57 @@ impl Keeper {
             "summary" => {
                 let overview = self.cached("usage/overview", &params, 8).await?;
                 let analysis = self.cached("usage/analysis", &params, 15).await?;
-                return Ok(json!({"overview":overview,"activity":totals(&analysis)}));
+                let models = rows(&analysis, "model_efficiency")
+                    .filter(|model| n(model, "requests") > 0 || n(model, "total_tokens") > 0)
+                    .collect::<Vec<_>>();
+                let unpriced_models = models
+                    .iter()
+                    .filter(|model| model["cost_available"] != true)
+                    .map(|model| s(model, "model"))
+                    .filter(|model| !model.is_empty())
+                    .collect::<Vec<_>>();
+                let cost_coverage = json!({
+                    "total_models": models.len(),
+                    "priced_models": models.len().saturating_sub(unpriced_models.len()),
+                    "unpriced_models": unpriced_models,
+                    "complete": analysis["cost_breakdown"]["cost_available"] == true,
+                });
+                return Ok(
+                    json!({"overview":overview,"activity":totals(&analysis),"cost_coverage":cost_coverage}),
+                );
             }
             "analysis" => return self.cached("usage/analysis", &params, 15).await,
             "latency" => return self.cached("usage/analysis/latency", &params, 30).await,
             "accounts" => {
-                let data = self
-                    .cached(
-                        "usage/identities/page",
-                        &[
-                            ("auth_type".into(), "1".into()),
-                            ("page_size".into(), "20".into()),
-                            ("page".into(), q.page.max(1).to_string()),
-                        ],
-                        30,
-                    )
-                    .await?;
+                let mut page = 1;
+                let mut total_pages = 1;
+                let mut total_count = 0;
+                let mut accounts = vec![];
+                while page <= total_pages {
+                    let data = self
+                        .cached(
+                            "usage/identities/page",
+                            &[
+                                ("auth_type".into(), "1".into()),
+                                ("page_size".into(), "100".into()),
+                                ("page".into(), page.to_string()),
+                            ],
+                            15,
+                        )
+                        .await?;
+                    total_pages = n(&data, "total_pages").max(1);
+                    total_count = n(&data, "total_count").max(total_count);
+                    accounts.extend(rows(&data, "identities").cloned());
+                    page += 1;
+                }
+                let auth_indexes = accounts
+                    .iter()
+                    .map(|account| s(account, "identity").trim())
+                    .filter(|identity| !identity.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
                 let mut identities = self.identities.lock().await;
-                for a in rows(&data, "identities") {
+                for a in &accounts {
                     identities.insert(
                         a["id"]
                             .as_str()
@@ -737,7 +807,19 @@ impl Keeper {
                         a.clone(),
                     );
                 }
-                return Ok(data);
+                drop(identities);
+                let quota_items = if auth_indexes.is_empty() {
+                    json!([])
+                } else {
+                    self.cached_post("quota/cache", json!({"auth_indexes":auth_indexes}), 30)
+                        .await?["items"]
+                        .clone()
+                };
+                return Ok(json!({
+                    "identities": accounts,
+                    "total_count": total_count.max(auth_indexes.len() as i64),
+                    "quota_items": quota_items
+                }));
             }
             _ => {}
         }
