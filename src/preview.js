@@ -162,7 +162,23 @@ export function createPreview(search) {
           allowInvalidCertificates: false,
           edgeAutoCollapse: true,
           fullscreenAutoHide: true,
+          skippedUpdateVersion: "",
         };
+      if (command === "pending_update")
+        return search.has("update")
+          ? {
+              version: "0.6.0",
+              notes:
+                "- 新增自动更新\n- 优化便携版原位替换\n- 更新下载沿用代理与证书设置",
+              releaseUrl:
+                "https://github.com/wlyzqm/Keeper-UsagePanel/releases/tag/v0.6.0",
+              portable: search.get("installed") !== "1",
+            }
+          : null;
+      if (["defer_update", "skip_update", "install_update"].includes(command)) {
+        window.__previewUpdateAction = command;
+        return;
+      }
       if (command === "last_sample") return offline ? null : sample;
       if (command === "sample") {
         if (offline) throw "无法连接 Keeper，请检查地址与网络";
@@ -296,7 +312,12 @@ export function createPreview(search) {
           return {
             events: Array.from({ length: q.cursor ? 2 : 24 }, (_, i) => ({
               timestamp: sample.sampled_at,
-              api_key: i % 2 ? "日常使用" : "开发项目 · sk-*********123456",
+              api_key:
+                i % 3 === 0
+                  ? "sk-*********123456"
+                  : i % 2
+                    ? "日常使用"
+                    : "开发项目",
               model: i % 2 ? "gpt-5.4-mini" : "gpt-5.4",
               failed: false,
               tokens: {

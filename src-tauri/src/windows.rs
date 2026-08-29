@@ -35,6 +35,7 @@ pub struct Hover {
     dock: Option<Dock>,
     fullscreen_hidden: bool,
     fullscreen_checked: Option<Instant>,
+    update_prompt: bool,
 }
 
 impl Hover {
@@ -535,6 +536,20 @@ pub fn show_detail(app: &tauri::AppHandle) {
     show_inactive(&panel);
     let _ = panel.emit("detail-open", ());
 }
+
+pub fn set_update_prompt(app: &tauri::AppHandle, active: bool) {
+    app.state::<AppState>().hover.lock().unwrap().update_prompt = active;
+    if active
+        && app
+            .get_webview_window("widget")
+            .is_some_and(|widget| visible(&widget))
+        && !app
+            .get_webview_window("settings")
+            .is_some_and(|settings| visible(&settings))
+    {
+        show_detail(app);
+    }
+}
 fn work_area(window: &tauri::WebviewWindow) -> (i32, i32, i32, i32) {
     #[cfg(windows)]
     unsafe {
@@ -913,6 +928,9 @@ pub fn track(app: tauri::AppHandle) {
             if !fullscreen && hidden_for_fullscreen {
                 state.hover.lock().unwrap().fullscreen_hidden = false;
                 show_inactive(&widget);
+                if state.hover.lock().unwrap().update_prompt {
+                    show_detail(&app);
+                }
             }
         }
         if !visible(&widget) {
@@ -1013,6 +1031,9 @@ pub fn track(app: tauri::AppHandle) {
             .get_webview_window("settings")
             .is_some_and(|w| foreground(&w))
         {
+            continue;
+        }
+        if state.hover.lock().unwrap().update_prompt {
             continue;
         }
         // Do not hold the hover mutex across calls dispatched to the UI thread.

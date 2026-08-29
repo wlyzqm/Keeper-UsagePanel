@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod settings;
+mod updates;
 mod windows;
 use keeper_core::{Keeper, Query};
 use serde_json::{json, Value};
@@ -302,6 +303,9 @@ fn widget_edge_state(state: State<AppState>) -> windows::WidgetEdgeState {
     result
 }
 fn main() {
+    if updates::handle_update_helper_args() {
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             windows::show_widget(app);
@@ -332,11 +336,13 @@ fn main() {
                 hover: Mutex::new(Default::default()),
                 scope: RwLock::new(Scope::default()),
             });
+            app.manage(updates::UpdateState::default());
             windows::create(app.handle())?;
             if need_config {
                 windows::show_settings(app.handle());
             }
             windows::track(app.handle().clone());
+            updates::track(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -349,7 +355,11 @@ fn main() {
             set_scope,
             open_console,
             window_action,
-            widget_edge_state
+            widget_edge_state,
+            updates::pending_update,
+            updates::defer_update,
+            updates::skip_update,
+            updates::install_update
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

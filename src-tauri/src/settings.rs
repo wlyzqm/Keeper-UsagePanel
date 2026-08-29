@@ -18,6 +18,7 @@ pub struct Settings {
     pub auto_start: bool,
     pub theme: String,
     pub accent_color: String,
+    pub skipped_update_version: String,
     pub proxy_url: String,
     pub widget_font: String,
     pub x: Option<i32>,
@@ -40,6 +41,7 @@ impl Default for Settings {
             auto_start: false,
             theme: "light".into(),
             accent_color: String::new(),
+            skipped_update_version: String::new(),
             proxy_url: String::new(),
             widget_font: "HarmonyOS Sans SC".into(),
             x: None,
@@ -151,6 +153,7 @@ mod platform {
         s.auto_start = k.get_value::<u32, _>("AutoStart").unwrap_or(0) == 1;
         s.theme = k.get_value("Theme").unwrap_or("light".into());
         s.accent_color = k.get_value("AccentColor").unwrap_or_default();
+        s.skipped_update_version = k.get_value("SkippedUpdateVersion").unwrap_or_default();
         s.x = k.get_value::<u32, _>("X").ok().map(|v| v as i32);
         s.y = k.get_value::<u32, _>("Y").ok().map(|v| v as i32);
         if s.remember_password {
@@ -201,6 +204,7 @@ mod platform {
             k.set_value("FullscreenAutoHide", &(s.fullscreen_auto_hide as u32))?;
             k.set_value("Theme", &s.theme)?;
             k.set_value("AccentColor", &s.accent_color)?;
+            k.set_value("SkippedUpdateVersion", &s.skipped_update_version)?;
             k.set_value("WidgetFont", &s.widget_font)?;
             if let Some(bytes) = proxy {
                 k.set_raw_value(

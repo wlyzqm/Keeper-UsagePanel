@@ -191,6 +191,53 @@ pub struct Keeper {
     identities: Mutex<HashMap<String, Value>>,
     counter: Mutex<(u64, String, Counter)>,
 }
+
+pub fn configured_http_client(
+    proxy_url: &str,
+    allow_invalid_certificates: bool,
+    timeout_seconds: u64,
+    redirect_limit: usize,
+) -> Result<(Client, String), String> {
+    let redirect = if redirect_limit == 0 {
+        reqwest::redirect::Policy::none()
+    } else {
+        reqwest::redirect::Policy::limited(redirect_limit)
+    };
+    let mut builder = Client::builder()
+        .no_proxy()
+        .cookie_store(true)
+        .redirect(redirect)
+        .danger_accept_invalid_certs(allow_invalid_certificates)
+        .timeout(std::time::Duration::from_secs(timeout_seconds));
+    let route = if !proxy_url.trim().is_empty() {
+        let proxy = Url::parse(proxy_url.trim())
+            .map_err(|_| "代理地址无效，请包含 http:// 或 socks5://")?;
+        if !matches!(proxy.scheme(), "http" | "https" | "socks5" | "socks5h")
+            || proxy.host_str().is_none()
+            || proxy.query().is_some()
+            || proxy.fragment().is_some()
+            || proxy.path() != "/" && !proxy.path().is_empty()
+        {
+            return Err("代理仅支持 HTTP / HTTPS / SOCKS5 / SOCKS5H 地址，不含路径或参数".into());
+        }
+        let route = format!(
+            "proxy {}://{}{}",
+            proxy.scheme(),
+            proxy.host_str().unwrap_or("unknown"),
+            proxy
+                .port()
+                .map(|port| format!(":{port}"))
+                .unwrap_or_default()
+        );
+        builder = builder
+            .proxy(reqwest::Proxy::all(proxy).map_err(|_| "无法创建代理，请检查地址与端口")?);
+        route
+    } else {
+        "direct".into()
+    };
+    Ok((builder.build().map_err(|_| "无法创建连接")?, route))
+}
+
 impl Keeper {
     pub fn new(endpoint: &str, password: &str, allow_http: bool) -> Result<Self, String> {
         Self::with_proxy(endpoint, password, allow_http, "")
@@ -224,42 +271,8 @@ impl Keeper {
             return Err("请输入 CPA API Key（sk）".into());
         }
         let base = validate_endpoint(endpoint, allow_http)?;
-        let mut builder = Client::builder()
-            .no_proxy()
-            .cookie_store(true)
-            .redirect(reqwest::redirect::Policy::none())
-            .danger_accept_invalid_certs(allow_invalid_certificates)
-            .timeout(std::time::Duration::from_secs(25));
-        let route = if !proxy_url.trim().is_empty() {
-            let proxy = Url::parse(proxy_url.trim())
-                .map_err(|_| "代理地址无效，请包含 http:// 或 socks5://")?;
-            if !matches!(proxy.scheme(), "http" | "https" | "socks5" | "socks5h")
-                || proxy.host_str().is_none()
-                || proxy.query().is_some()
-                || proxy.fragment().is_some()
-                || proxy.path() != "/" && !proxy.path().is_empty()
-            {
-                return Err(
-                    "代理仅支持 HTTP / HTTPS / SOCKS5 / SOCKS5H 地址，不含路径或参数".into(),
-                );
-            }
-            let route = format!(
-                "proxy {}://{}{}",
-                proxy.scheme(),
-                proxy.host_str().unwrap_or("unknown"),
-                proxy
-                    .port()
-                    .map(|port| format!(":{port}"))
-                    .unwrap_or_default()
-            );
-            builder = builder.proxy(
-                reqwest::Proxy::all(proxy).map_err(|_| "无法创建代理，请检查地址与端口")?,
-            );
-            route
-        } else {
-            "direct".into()
-        };
-        let http = builder.build().map_err(|_| "无法创建连接")?;
+        let (http, route) =
+            configured_http_client(proxy_url, allow_invalid_certificates, 25, 0)?;
         Ok(Self {
             http,
             base,

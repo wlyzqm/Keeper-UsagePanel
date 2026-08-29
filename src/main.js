@@ -52,6 +52,7 @@ const state = {
   visible: windowName === "detail",
   data: null,
   loading: false,
+  update: null,
 };
 const tabs = [
   ["summary", "总览", "overview"],
@@ -165,6 +166,24 @@ const copyConnectionErrlog = async (button) => {
   }
   button.textContent = "已复制 ERRLOG";
 };
+const closeUpdateDialog = () => {
+  $("#update-dialog")?.remove();
+};
+const showUpdateDialog = (info) => {
+  state.update = info;
+  if (windowName === "widget") return;
+  closeUpdateDialog();
+  root.insertAdjacentHTML(
+    "beforeend",
+    `<section class="update-dialog" id="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title"><div class="update-card"><div class="update-kicker">UPDATE / ${info.portable ? "PORTABLE" : "NSIS"}</div><h2 id="update-title">发现新版本 ${e(info.version)}</h2><p class="update-mode">${info.portable ? "便携版将原位替换程序并自动重启。" : "安装版将静默覆盖安装并自动重启。"}</p><pre class="update-notes">${e(info.notes || "此版本未提供更新说明。")}</pre><p class="update-network">下载沿用连接设置中的代理与 HTTPS 证书选项，并在安装前校验 SHA-256。</p><div class="update-error" id="update-error" role="alert"></div><div class="update-actions"><button type="button" data-update-action="skip">跳过此版本</button><button type="button" data-update-action="later">稍后更新</button><button type="button" class="update-now" data-update-action="install">一键更新</button></div></div></section>`,
+  );
+  $("[data-update-action=install]")?.focus();
+};
+const deferUpdate = async () => {
+  closeUpdateDialog();
+  state.update = null;
+  await api.call("defer_update").catch(console.error);
+};
 const button = (name, title) =>
   `<button class="icon-button" data-action="${name}" title="${title}" aria-label="${title}">${icon(name === "close-detail" || name === "close-settings" ? "close" : name)}</button>`;
 const note = (text) =>
@@ -194,6 +213,15 @@ const requestTable = (headers, items, kinds) =>
   items.length
     ? `<div class="request-table-frame"><div class="request-table-scroll" tabindex="0" role="region" aria-label="请求明细横向滚动条"><div class="request-table-scroll-width"></div></div>${table(headers, items, kinds, "request-table-wrap")}</div>`
     : `<div class="rows-card empty-inline">此范围暂无记录</div>`;
+const requestKeyAlias = (value) => {
+  const alias = String(value || "").trim();
+  return !alias ||
+    alias === "unknown" ||
+    /^sk-/i.test(alias) ||
+    /\*{3,}/.test(alias)
+    ? "—"
+    : alias;
+};
 const picker = (name, label, options, selected, extra = "") =>
   `<details class="picker ${extra}"><summary aria-label="${name === "key" ? "选择 Key owner" : name === "range" ? "更多日期范围" : name === "account" ? "选择认证账户" : "切换分布维度"}">${name === "key" ? icon("key") : ""}<span class="picker-label">${e(label)}</span>${icon("chevron")}</summary><div class="picker-menu">${options.map(([value, text]) => `<button data-pick="${name}" data-value="${e(value)}" class="${String(value) === String(selected) ? "selected" : ""}" title="${e(text)}">${e(text)}</button>`).join("")}</div></details>`;
 
@@ -540,7 +568,7 @@ function accountBody(account, data) {
         ],
         (data.events || []).map((m) => [
           time(m.timestamp),
-          m.api_key || "—",
+          requestKeyAlias(m.api_key),
           m.model,
           m.failed ? "失败" : "成功",
           number(m.tokens?.input_tokens),
@@ -758,7 +786,17 @@ function settings() {
   const s = state.settings;
   const sk = s.authMode === "api_key";
   const section = (id, title, hint, content) =>
-    `<section class="setting-section" data-setting-section="${id}"><header><h2>${title}</h2><p>${hint}</p></header>${content}</section>`;
+    `<section class="setting-section" data-setting-section="${id}" id="settings-page-${id}" role="tabpanel" aria-labelledby="settings-tab-${id}" ${id === "connection" ? "" : "hidden"}><header><h2>${title}</h2><p>${hint}</p></header>${content}</section>`;
+  const settingTabs = [
+    ["connection", "连接参数"],
+    ["appearance", "外观与样式"],
+    ["behavior", "悬浮窗行为"],
+  ]
+    .map(
+      ([id, label], index) =>
+        `<button type="button" id="settings-tab-${id}" data-settings-tab="${id}" role="tab" aria-controls="settings-page-${id}" aria-selected="${index === 0}" class="${index === 0 ? "active" : ""}">${label}</button>`,
+    )
+    .join("");
   const themeButtons = [
     ["light", "浅色"],
     ["dark", "深色"],
@@ -802,11 +840,11 @@ function settings() {
     "刷新频率、数据展示与自动隐藏",
     `<div class="preference-row"><label for="poll-seconds">刷新间隔 <span class="muted">/ 秒</span></label><input id="poll-seconds" name="pollSeconds" type="number" min="1" max="60" value="${s.pollSeconds}" required></div><div class="preference-row"><label for="display-hold-seconds">非零数据保留 <span class="muted">/ 秒</span></label><input id="display-hold-seconds" name="displayHoldSeconds" type="number" min="0" max="300" value="${s.displayHoldSeconds ?? 16}" required></div><p class="field-hint setting-hint">连续收到零用量达到此时长后归零；设为 0 即立即归零。</p><label class="check-row setting-toggle"><input type="checkbox" name="edgeAutoCollapse" ${s.edgeAutoCollapse !== false ? "checked" : ""}><span><strong>贴近屏幕边缘自动收起</strong><small>拖到屏幕左右外沿时折叠，移入鼠标后展开。</small></span></label><label class="check-row setting-toggle"><input type="checkbox" name="fullscreenAutoHide" ${s.fullscreenAutoHide !== false ? "checked" : ""}><span><strong>全屏时自动隐藏悬浮窗</strong><small>游戏、视频或无边框全屏结束后自动恢复展示。</small></span></label><label class="check-row setting-toggle"><input type="checkbox" name="autoStart" ${s.autoStart ? "checked" : ""}><span><strong>登录 Windows 后启动</strong><small>随当前用户会话自动启动用量面板。</small></span></label>`,
   );
-  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><span class="spacer"></span><span class="eyebrow">设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><div class="settings-body">${connection}${appearance}${behavior}</div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form><section class="connection-error-dialog" id="connection-error-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-error-title" aria-describedby="connection-error-summary" hidden><div class="connection-error-card"><div class="error-dialog-kicker">CONNECTION / ERRLOG</div><h2 id="connection-error-title">Keeper 连接失败</h2><p id="connection-error-summary"></p><pre id="connection-errlog" tabindex="0"></pre><p class="error-dialog-hint">日志已隐藏登录凭据与代理认证信息，可直接复制用于排查。</p><div class="error-dialog-actions"><button type="button" data-error-action="close">返回设置</button><button type="button" class="copy-errlog" data-error-action="copy">复制 ERRLOG</button></div></div></section></main></div>`;
+  return `<div class="window-pad"><main class="panel settings"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><span class="spacer"></span><span class="eyebrow">设置</span>${button("close-settings", "关闭设置")}</div></header><form id="settings-form" class="settings-form"><nav class="settings-tabs" role="tablist" aria-label="设置类别">${settingTabs}</nav><div class="settings-body">${connection}${appearance}${behavior}</div><footer class="settings-actions"><div class="settings-error" id="settings-error" role="alert"></div><button type="submit" class="connect-button" id="save-settings">保存并连接 ${icon("arrow")}</button><div class="registry-note">${icon("shield")}配置保存在当前用户注册表 · 无需远程服务</div></footer></form><section class="connection-error-dialog" id="connection-error-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-error-title" aria-describedby="connection-error-summary" hidden><div class="connection-error-card"><div class="error-dialog-kicker">CONNECTION / ERRLOG</div><h2 id="connection-error-title">Keeper 连接失败</h2><p id="connection-error-summary"></p><pre id="connection-errlog" tabindex="0"></pre><p class="error-dialog-hint">日志已隐藏登录凭据与代理认证信息，可直接复制用于排查。</p><div class="error-dialog-actions"><button type="button" data-error-action="close">返回设置</button><button type="button" class="copy-errlog" data-error-action="copy">复制 ERRLOG</button></div></div></section></main></div>`;
 }
 
 root.innerHTML = preview
-  ? `<div class="preview-stage ${search.has("standalone") ? "standalone" : ""} ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / 0.4　·　界面预览，示例数据</div></div>`
+  ? `<div class="preview-stage ${search.has("standalone") ? "standalone" : ""} ${windowName === "settings" ? "settings-preview" : windowName === "widget" ? "widget-only" : ""}">${windowName === "settings" ? "" : `<div class="preview-widget">${widget()}</div>`}<div class="preview-panel">${windowName === "settings" ? "" : panel()}</div><div class="preview-label">KEEPER / 0.5　·　界面预览，示例数据</div></div>`
   : windowName === "widget"
     ? widget()
     : windowName === "settings"
@@ -822,6 +860,37 @@ document.addEventListener("click", async (event) => {
   }
   if (b.dataset.errorAction === "copy") {
     await copyConnectionErrlog(b);
+    return;
+  }
+  if (b.dataset.updateAction) {
+    if (b.dataset.updateAction === "later") {
+      await deferUpdate();
+      return;
+    }
+    if (b.dataset.updateAction === "skip") {
+      try {
+        const version = state.update?.version || "";
+        await api.call("skip_update");
+        state.settings.skippedUpdateVersion = version;
+        closeUpdateDialog();
+        state.update = null;
+      } catch (error) {
+        $("#update-error").textContent = String(error);
+      }
+      return;
+    }
+    const buttons = document.querySelectorAll("[data-update-action]");
+    buttons.forEach((button) => (button.disabled = true));
+    b.textContent = "正在下载并校验…";
+    $("#update-error").textContent = "";
+    try {
+      await api.call("install_update");
+      b.textContent = preview ? "预览模式：更新已验证" : "正在退出并更新…";
+    } catch (error) {
+      $("#update-error").textContent = String(error);
+      b.textContent = "重新一键更新";
+      buttons.forEach((button) => (button.disabled = false));
+    }
     return;
   }
   if (b.dataset.console) {
@@ -854,8 +923,30 @@ document.addEventListener("click", async (event) => {
     applyAppearance();
     return;
   }
+  if (b.dataset.settingsTab) {
+    const selected = b.dataset.settingsTab;
+    document.querySelectorAll("[data-settings-tab]").forEach((tab) => {
+      const active = tab === b;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll("[data-setting-section]").forEach((page) => {
+      page.hidden = page.dataset.settingSection !== selected;
+    });
+    const body = $(".settings-body");
+    if (body) body.scrollTop = 0;
+    return;
+  }
   if (b.dataset.action) {
     const name = b.dataset.action;
+    if (
+      (name === "close-detail" || name === "close-settings") &&
+      $("#update-dialog")
+    ) {
+      await deferUpdate();
+      await action(name);
+      return;
+    }
     if (name === "refresh") {
       state.cursor = "";
       await load();
@@ -926,6 +1017,10 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if ($("#update-dialog")) {
+      deferUpdate();
+      return;
+    }
     if (!$("#connection-error-dialog")?.hidden) {
       closeConnectionError();
       return;
@@ -1151,8 +1246,16 @@ await api.on("settings-open", async () => {
     state.settings = await api.call("get_settings");
     applySettings();
     root.innerHTML = settings();
+    if (state.update) showUpdateDialog(state.update);
   }
 });
+if (windowName !== "widget") {
+  await api.on("update-available", showUpdateDialog);
+  await api.on("update-dismissed", () => {
+    closeUpdateDialog();
+    state.update = null;
+  });
+}
 if (windowName !== "settings") {
   await api.on("scope-changed", applyAccess);
   await api.on("sample", acceptSample);
@@ -1185,6 +1288,10 @@ try {
   } else {
     await refreshAccess();
     acceptSample(await api.call("last_sample"));
+  }
+  if (windowName !== "widget") {
+    const update = await api.call("pending_update");
+    if (update) showUpdateDialog(update);
   }
 } catch (error) {
   state.error = String(error);

@@ -176,6 +176,17 @@ try {
     await page.locator(".setting-section > header h2").allTextContents(),
     ["连接参数", "外观与样式", "悬浮窗行为"],
   );
+  assert.deepEqual(
+    await page.locator("[data-settings-tab]").allTextContents(),
+    ["连接参数", "外观与样式", "悬浮窗行为"],
+  );
+  assert.equal(await page.locator("[data-setting-section]:visible").count(), 1);
+  assert.equal(
+    await page
+      .locator('[data-settings-tab="connection"]')
+      .getAttribute("aria-selected"),
+    "true",
+  );
   assert.equal(
     await page.locator(".settings .brand-subtitle").innerText(),
     "用量面板",
@@ -196,6 +207,15 @@ try {
   );
   assert.equal(await page.locator("#accent-color-picker").count(), 1);
   await page.screenshot({ path: ".cache/screenshots/settings.png" });
+  await page.locator('[data-settings-tab="appearance"]').click();
+  assert.equal(
+    await page.locator('[data-setting-section="appearance"]').isVisible(),
+    true,
+  );
+  assert.equal(
+    await page.locator('[data-setting-section="connection"]').isHidden(),
+    true,
+  );
   await page.locator("[data-theme=dark]").click();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   await page.locator('[data-accent="#087f8c"]').click();
@@ -205,14 +225,24 @@ try {
     ),
     "#087f8c",
   );
-  await page
-    .locator('[data-setting-section="appearance"]')
-    .scrollIntoViewIfNeeded();
+  assert.equal(
+    await page.locator("[name=widgetFont]").inputValue(),
+    "HarmonyOS Sans SC",
+  );
+  await page.locator("[name=widgetFont]").fill("Microsoft YaHei");
   await page.screenshot({ path: ".cache/screenshots/settings-appearance.png" });
-  await page
-    .locator('[data-setting-section="behavior"]')
-    .scrollIntoViewIfNeeded();
+  await page.locator('[data-settings-tab="behavior"]').click();
+  assert.equal(
+    await page.locator('[data-setting-section="behavior"]').isVisible(),
+    true,
+  );
+  assert.equal(
+    await page.locator("[name=displayHoldSeconds]").inputValue(),
+    "16",
+  );
+  await page.locator("[name=displayHoldSeconds]").fill("6");
   await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
+  await page.locator('[data-settings-tab="connection"]').click();
   await page
     .locator("#settings-form [name=endpoint]")
     .fill("https://keeper.example/usage");
@@ -231,16 +261,6 @@ try {
   );
   await page.locator("[name=allowInvalidCertificates]").check();
   await page.screenshot({ path: ".cache/screenshots/tls-warning.png" });
-  assert.equal(
-    await page.locator("[name=widgetFont]").inputValue(),
-    "HarmonyOS Sans SC",
-  );
-  assert.equal(
-    await page.locator("[name=displayHoldSeconds]").inputValue(),
-    "16",
-  );
-  await page.locator("[name=displayHoldSeconds]").fill("6");
-  await page.locator("[name=widgetFont]").fill("Microsoft YaHei");
   await page.locator("[name=authMode]").selectOption("api_key");
   assert.equal(
     await page.locator("#credential-label").innerText(),
@@ -484,15 +504,29 @@ try {
         .then((items) => items[1]),
       "sk",
     );
-    assert.ok(
-      (
-        await page
-          .locator(".request-table-wrap tbody tr")
-          .first()
-          .locator("td")
-          .nth(1)
-          .innerText()
-      ).includes("sk-"),
+    assert.equal(
+      await page
+        .locator(".request-table-wrap tbody tr")
+        .first()
+        .locator("td")
+        .nth(1)
+        .innerText(),
+      "—",
+    );
+    assert.equal(
+      await page
+        .locator(".request-table-wrap tbody tr")
+        .nth(1)
+        .locator("td")
+        .nth(1)
+        .innerText(),
+      "日常使用",
+    );
+    assert.equal(
+      (await page.locator(".request-table-wrap tbody").innerText()).includes(
+        "sk-",
+      ),
+      false,
     );
     await page.screenshot({ path: `.cache/screenshots/requests-${theme}.png` });
     await page.locator(".request-table-scroll").evaluate((el) => {
@@ -509,6 +543,41 @@ try {
         .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
     );
   }
+  await page.goto("http://127.0.0.1:1420/?preview=1&update=1");
+  await page.locator("#update-dialog").waitFor();
+  assert.equal(
+    await page.locator("#update-title").innerText(),
+    "发现新版本 0.6.0",
+  );
+  assert.ok(
+    (await page.locator(".update-mode").innerText()).includes("便携版"),
+  );
+  assert.ok(
+    (await page.locator(".update-notes").innerText()).includes("自动更新"),
+  );
+  assert.ok(
+    (await page.locator(".update-network").innerText()).includes(
+      "代理与 HTTPS 证书选项",
+    ),
+  );
+  await page.screenshot({ path: ".cache/screenshots/update-portable.png" });
+  await page.locator('[data-update-action="later"]').click();
+  await page.locator("#update-dialog").waitFor({ state: "detached" });
+  assert.equal(
+    await page.evaluate(() => window.__previewUpdateAction),
+    "defer_update",
+  );
+  await page.goto("http://127.0.0.1:1420/?preview=1&update=1&installed=1");
+  await page.locator("#update-dialog").waitFor();
+  assert.ok(
+    (await page.locator(".update-mode").innerText()).includes("安装版"),
+  );
+  await page.locator('[data-update-action="skip"]').click();
+  await page.locator("#update-dialog").waitFor({ state: "detached" });
+  assert.equal(
+    await page.evaluate(() => window.__previewUpdateAction),
+    "skip_update",
+  );
   // Controlled preview delivery checks that smoothing affects the widget only.
   await page.goto("http://127.0.0.1:1420/?preview=1&manual");
   await page.locator(".metric-value").first().waitFor();
@@ -704,7 +773,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, settings groups/title/theme palette/window behavior switches, quota efficiency semantics, compact latency samples, request sk column with top horizontal and internal vertical scrolling, five tabs, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
+    "PASS: browser rendering, paged settings/title/theme palette/window behavior switches, quota efficiency semantics, compact latency samples, alias-only sk cells, top horizontal and internal vertical request scrolling, portable update prompt/actions, five tabs, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
   );
 } finally {
   await browser?.close();
