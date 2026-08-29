@@ -1,6 +1,7 @@
 // Development only. Vite removes this import from the production bundle.
 export function createPreview(search) {
   const listeners = new Map();
+  let edgeStateCalls = 0;
   const viewer = search.get("role") === "sk";
   let access = {
     role: viewer ? "api_key_viewer" : "admin",
@@ -145,6 +146,11 @@ export function createPreview(search) {
       window.__previewCalls.push({ command, args });
       if (command === "open_console") return;
       if (command === "widget_edge_state") {
+        edgeStateCalls += 1;
+        if (search.has("edgeMissed"))
+          return edgeStateCalls === 1
+            ? { side: null, collapsed: false, ready: false }
+            : { side: "right", collapsed: true, ready: true };
         if (search.has("edgeRace")) {
           setTimeout(
             () =>

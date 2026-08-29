@@ -11,7 +11,8 @@ use std::{
 use tauri::{Emitter, Manager, State, WebviewWindow};
 use tokio::sync::Mutex as AsyncMutex;
 
-const RELEASE_API: &str = "https://api.github.com/repos/wlyzqm/Keeper-UsagePanel/releases/latest";
+const UPDATE_MANIFEST: &str =
+    "https://github.com/wlyzqm/Keeper-UsagePanel/releases/latest/download/update.json";
 const USER_AGENT: &str = "Keeper-UsagePanel-Updater";
 
 #[derive(Clone, serde::Serialize)]
@@ -37,17 +38,20 @@ pub struct UpdateState {
 }
 
 #[derive(Deserialize)]
-struct GitHubRelease {
-    tag_name: String,
-    body: Option<String>,
-    html_url: String,
-    assets: Vec<GitHubAsset>,
+#[serde(rename_all = "camelCase")]
+struct UpdateManifest {
+    version: String,
+    notes: String,
+    release_url: String,
+    portable: UpdateAsset,
+    installed: UpdateAsset,
 }
 
 #[derive(Clone, Deserialize)]
-struct GitHubAsset {
+struct UpdateAsset {
     name: String,
-    browser_download_url: String,
+    url: String,
+    sha256: String,
 }
 
 fn version_parts(value: &str) -> Option<[u64; 3]> {
@@ -83,16 +87,10 @@ fn portable_mode() -> bool {
         && parent.join("uninstall.exe").is_file())
 }
 
-fn checksum_for(checksums: &str, asset_name: &str) -> Option<String> {
-    checksums.lines().find_map(|line| {
-        let mut fields = line.split_whitespace();
-        let digest = fields.next()?;
-        let name = fields.next()?.trim_start_matches('*');
-        (name == asset_name
-            && digest.len() == 64
-            && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+fn validated_sha256(value: &str) -> Option<String> {
+    let digest = value.trim();
+    (digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .then(|| digest.to_ascii_lowercase())
-    })
 }
 
 async fn fetch_candidate(
@@ -106,20 +104,22 @@ async fn fetch_candidate(
         10,
     )?;
     let response = http
-        .get(RELEASE_API)
+        .get(UPDATE_MANIFEST)
         .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|error| format!("无法检查 GitHub Release：{error}"))?;
+        .map_err(|error| format!("无法读取更新清单：{error}"))?;
     if !response.status().is_success() {
-        return Err(format!("GitHub Release 返回 HTTP {}", response.status()));
+        return Err(format!("更新清单返回 HTTP {}", response.status()));
     }
-    let release: GitHubRelease = response
+    let manifest: UpdateManifest = response
         .json()
         .await
-        .map_err(|error| format!("无法解析 GitHub Release：{error}"))?;
-    let version = release.tag_name.trim_start_matches('v').to_string();
+        .map_err(|error| format!("无法解析更新清单：{error}"))?;
+    let version = manifest.version.trim_start_matches('v').to_string();
+    if version_parts(&version).is_none() {
+        return Err("更新清单中的版本号无效".into());
+    }
     if !newer_than_current(&version)
         || respect_skipped_version && config.skipped_update_version == version
     {
@@ -131,41 +131,29 @@ async fn fetch_candidate(
     } else {
         format!("KeeperUsagePanel_{version}_x64-setup.exe")
     };
-    let asset = release
-        .assets
-        .iter()
-        .find(|asset| asset.name == asset_name)
-        .ok_or_else(|| format!("Release 缺少更新文件 {asset_name}"))?;
-    let checksum_asset = release
-        .assets
-        .iter()
-        .find(|asset| asset.name == "SHA256SUMS.txt")
-        .ok_or("Release 缺少 SHA256SUMS.txt")?;
-    let checksums = http
-        .get(&checksum_asset.browser_download_url)
-        .header("User-Agent", USER_AGENT)
-        .send()
-        .await
-        .map_err(|error| format!("无法下载更新校验文件：{error}"))?;
-    if !checksums.status().is_success() {
-        return Err(format!("更新校验文件返回 HTTP {}", checksums.status()));
+    let asset = if portable {
+        &manifest.portable
+    } else {
+        &manifest.installed
+    };
+    if asset.name != asset_name {
+        return Err(format!("更新清单缺少更新文件 {asset_name}"));
     }
-    let checksums = checksums
-        .text()
-        .await
-        .map_err(|error| format!("无法读取更新校验文件：{error}"))?;
-    let sha256 = checksum_for(&checksums, &asset_name)
-        .ok_or_else(|| format!("校验文件中缺少 {asset_name}"))?;
+    let sha256 = validated_sha256(&asset.sha256)
+        .ok_or_else(|| format!("更新清单中的 {asset_name} 校验值无效"))?;
+    let download_url = asset.url.clone();
     Ok(Some(Candidate {
         info: UpdateInfo {
             version,
-            notes: release
-                .body
-                .unwrap_or_else(|| "此版本未提供更新说明。".into()),
-            release_url: release.html_url,
+            notes: if manifest.notes.trim().is_empty() {
+                "此版本未提供更新说明。".into()
+            } else {
+                manifest.notes
+            },
+            release_url: manifest.release_url,
             portable,
         },
-        download_url: asset.browser_download_url.clone(),
+        download_url,
         sha256,
     }))
 }
@@ -410,7 +398,7 @@ pub fn handle_update_helper_args() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{checksum_for, newer_than_current, version_parts};
+    use super::{newer_than_current, validated_sha256, version_parts};
 
     #[test]
     fn versions_are_strict_three_part_numbers() {
@@ -422,12 +410,11 @@ mod tests {
     }
 
     #[test]
-    fn checksum_parser_requires_the_exact_asset() {
-        let text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  KeeperUsagePanel.exe\n";
+    fn update_digest_must_be_sha256_hex() {
         assert_eq!(
-            checksum_for(text, "KeeperUsagePanel.exe"),
+            validated_sha256("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
             Some("a".repeat(64))
         );
-        assert_eq!(checksum_for(text, "setup.exe"), None);
+        assert_eq!(validated_sha256("not-a-sha256"), None);
     }
 }

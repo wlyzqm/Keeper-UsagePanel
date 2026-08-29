@@ -337,7 +337,7 @@ try {
   await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
   await page.locator('[data-settings-tab="updates"]').click();
   assert.ok(
-    (await page.locator("#update-center").innerText()).includes("0.5.4"),
+    (await page.locator("#update-center").innerText()).includes("0.5.5"),
   );
   await page.screenshot({ path: ".cache/screenshots/settings-updates.png" });
   await page.locator('[data-action="check-update"]').click();
@@ -995,9 +995,45 @@ try {
       await context.close();
     }
   }
+  {
+    const context = await browser.newContext({
+      viewport: { width: 34, height: 74 },
+    });
+    try {
+      const missedEventPage = await context.newPage();
+      await missedEventPage.goto(
+        "http://127.0.0.1:1420/?preview=1&window=widget&standalone&manual&edgeMissed=1",
+      );
+      const missedEventWidget = missedEventPage.locator(
+        ".widget-wrap.widget-layout-ready.edge-collapsed[data-edge=right]",
+      );
+      await missedEventWidget.waitFor();
+      assert.equal(
+        await missedEventWidget.evaluate(
+          (el) => getComputedStyle(el).visibility,
+        ),
+        "visible",
+        "A missed final event must be recovered by querying the ready state again",
+      );
+      assert.equal(
+        await missedEventPage
+          .locator(".widget-total")
+          .evaluate((el) => getComputedStyle(el).display),
+        "none",
+      );
+      assert.ok(
+        (await missedEventPage.evaluate(() => window.__previewCalls)).filter(
+          ({ command }) => command === "widget_edge_state",
+        ).length >= 2,
+        "The startup handshake must retry an unready edge-state query",
+      );
+    } finally {
+      await context.close();
+    }
+  }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, four-section settings and manual update, passive update entry, complete/partial cost notices, all-account summary, three- and four-quota card layouts with remaining percentages, compact account detail, full-width synchronized request/quota-efficiency sliders without the clipped footer note, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, startup edge-state races, contrast and DPI rendering.",
+    "PASS: browser rendering, four-section settings and manual update, passive update entry, complete/partial cost notices, all-account summary, three- and four-quota card layouts with remaining percentages, compact account detail, full-width synchronized request/quota-efficiency sliders without the clipped footer note, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, startup edge-state races and missed-event recovery, contrast and DPI rendering.",
   );
 } finally {
   await browser?.close();

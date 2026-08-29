@@ -84,6 +84,33 @@ jobs:
               add('README.txt', readme)
               for path in [Path('README.md'), *sorted(Path('docs').glob('*'))]:
                   if path.is_file(): add(str(path), path.read_bytes())
+          digests = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in sorted(out.iterdir())
+          }
+          portable = 'KeeperUsagePanel.exe'
+          installed = f'KeeperUsagePanel_{version}_x64-setup.exe'
+          notes = '\n'.join([
+              '- 修复启动最终边缘状态事件先于 WebView 监听器到达时，悬浮球一直不可见的问题。',
+              '- 启动查询遇到原生窗口尚未就绪时会继续握手，直到取得展开或收起的最终布局。',
+              '- 更新检查改用 Release 固定清单，不再消耗 GitHub REST API 的共享 IP 额度。',
+          ])
+          update = {
+              'version': version,
+              'notes': notes,
+              'releaseUrl': f'https://github.com/wlyzqm/Keeper-UsagePanel/releases/tag/v{version}',
+              'portable': {
+                  'name': portable,
+                  'url': f'https://github.com/wlyzqm/Keeper-UsagePanel/releases/download/v{version}/{portable}',
+                  'sha256': digests[portable],
+              },
+              'installed': {
+                  'name': installed,
+                  'url': f'https://github.com/wlyzqm/Keeper-UsagePanel/releases/download/v{version}/{installed}',
+                  'sha256': digests[installed],
+              },
+          }
+          (out / 'update.json').write_text(json.dumps(update, ensure_ascii=False, separators=(',', ':')) + '\n')
           entries = []
           for path in sorted(out.iterdir()):
               entries.append(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}')
@@ -130,13 +157,15 @@ jobs:
             const body = [
               `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
               '',
-              '- 修复悬浮球以贴边收起状态启动时，旧状态查询结果晚到并覆盖正确收起事件的问题。',
-              '- 原生窗口恢复完成前的状态现在带有未就绪标记，前端只在最终状态到达后绘制对应布局。',
+              '- 修复启动最终边缘状态事件先于 WebView 监听器到达时，悬浮球一直不可见的问题。',
+              '- 启动查询遇到原生窗口尚未就绪时会继续握手，直到取得展开或收起的最终布局。',
+              '- 更新检查改用 Release 固定清单，不再消耗 GitHub REST API 的共享 IP 额度。',
               `- Keeper 请求按管理员或 sk 登录写入 Keeper-UsagePanel_${version} User-Agent；未改变连接参数时保存设置不重复登录。`,
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
               '- win-x64.zip：便携版、使用说明与界面预览；需已有 WebView2。',
               '- KeeperUsagePanel.exe：独立便携程序。',
               '- SHA256SUMS.txt：上述文件校验值。',
+              '- update.json：客户端使用的固定更新清单。',
               '',
               '运行成品无需 Rust / Cargo / .NET。升级前退出旧版。程序未签名，Windows 原生交互仍需实机验收。',
               '',

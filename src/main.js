@@ -189,7 +189,7 @@ const renderUpdateEntry = () => {
 const updateCenterMarkup = () =>
   state.update
     ? `<div class="update-center-status available"><span><strong>有新版本 ${e(state.update.version)}</strong><small>已在本次启动时检测，可由你决定何时升级。</small></span><button type="button" class="small-button" data-action="open-update">查看升级选项</button></div>`
-    : `<div class="update-center-status"><span><strong>${state.checkingUpdate ? "正在检查更新…" : `当前已安装 ${e(APP_VERSION)}`}</strong><small>${state.checkingUpdate ? "正在读取 GitHub Release。" : e(state.updateMessage || "自动检查仅在每次应用启动时执行一次。")}</small></span><button type="button" class="small-button" data-action="check-update" ${state.checkingUpdate ? "disabled" : ""}>立即检查更新</button></div>`;
+    : `<div class="update-center-status"><span><strong>${state.checkingUpdate ? "正在检查更新…" : `当前已安装 ${e(APP_VERSION)}`}</strong><small>${state.checkingUpdate ? "正在读取更新清单。" : e(state.updateMessage || "自动检查仅在每次应用启动时执行一次。")}</small></span><button type="button" class="small-button" data-action="check-update" ${state.checkingUpdate ? "disabled" : ""}>立即检查更新</button></div>`;
 const renderUpdateCenter = () => {
   const center = $("#update-center");
   if (!center) return;
@@ -258,15 +258,17 @@ function widget() {
   return `<div class="widget-wrap" id="widget-wrap"><div class="widget" id="widget" role="button" tabindex="0" aria-label="Keeper 用量，悬停或点击查看详情，拖动移动"><span class="widget-health neutral" id="health" role="img" aria-label="未连接" title="未连接"><i class="dot"></i></span><div class="widget-total"><strong class="widget-number num" id="today-total">—</strong><span class="widget-unit">Token</span></div><div class="widget-flows"><div class="flow-row flow-zero" id="input-flow">${icon("output")}<span>输入</span><strong class="num" id="delta-input">—</strong></div><div class="flow-row flow-zero" id="output-flow">${icon("input")}<span>输出</span><strong class="num" id="delta-output">—</strong></div></div><div class="widget-peek" aria-hidden="true"><span class="peek-health neutral" id="edge-health"><i class="dot"></i></span><span class="peek-total num"><strong id="edge-token-value">—</strong><span id="edge-token-unit"></span></span></div></div></div>`;
 }
 
+let widgetEdgeReady = false;
 function applyWidgetEdge(next = {}) {
   const wrap = $("#widget-wrap");
-  if (!wrap) return;
-  if (next.ready === false) return;
+  if (!wrap || next.ready === false) return false;
   const side = next.side === "left" || next.side === "right" ? next.side : "";
   wrap.classList.toggle("edge-collapsed", !!side && next.collapsed === true);
   if (side) wrap.dataset.edge = side;
   else delete wrap.dataset.edge;
   wrap.classList.add("widget-layout-ready");
+  widgetEdgeReady = true;
+  return true;
 }
 function panel() {
   return `<div class="window-pad"><main class="panel" aria-label="Keeper 用量详情"><header class="panel-header"><div class="brand-row"><div class="logo">${icon("logo")}</div><div class="brand-title">Keeper <span class="brand-subtitle">用量面板</span></div><button type="button" class="update-entry" id="update-entry" data-action="open-update" hidden>有新版本</button><div class="spacer"></div><div id="connection" class="connection neutral"><i class="dot"></i>未连接</div><div class="header-actions"><button class="console-button" data-console="usage" title="在默认浏览器打开配置的 Keeper 地址">用量控制台</button><button class="console-button" data-console="cpa" id="cpa-console" disabled title="连接后获取 CPA 地址">CPA 控制台</button><button class="settings-button" data-action="settings">设置</button></div>${button("close-detail", "收起面板")}</div><div id="filters"></div><nav class="tabs" aria-label="指标分类">${availableTabs()
@@ -1082,16 +1084,21 @@ root.innerHTML = preview
       ? ""
       : panel();
 
-// The native window may already be restored at its 34 DIP collapsed width.
-// Ignore pre-restore query results so they cannot overwrite the final native edge event.
+// The final native edge event can fire before this WebView has registered its listener.
+// Keep querying while restoration is incomplete so a missed event cannot leave the widget hidden.
 if ($("#widget")) {
   await api.on("widget-edge", applyWidgetEdge);
-  try {
-    applyWidgetEdge(await api.call("widget_edge_state"));
-  } catch (error) {
-    console.error(error);
-    applyWidgetEdge();
+  for (let attempt = 0; attempt < 100 && !widgetEdgeReady; attempt += 1) {
+    try {
+      applyWidgetEdge(await api.call("widget_edge_state"));
+    } catch (error) {
+      console.error(error);
+      break;
+    }
+    if (!widgetEdgeReady)
+      await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  if (!widgetEdgeReady) applyWidgetEdge();
 }
 
 document.addEventListener("click", async (event) => {
