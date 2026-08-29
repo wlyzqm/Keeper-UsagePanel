@@ -400,7 +400,7 @@ function costs(data) {
   const b = data.cost_breakdown || {};
   const coverage = costCoverage(data.model_efficiency || []);
   const coverageNote = coverage.complete
-    ? '<div class="cost-coverage complete">全部已用模型均已配置价格，以下为完整估算。</div>'
+    ? ""
     : coverage.pricedModels > 0
       ? `<div class="cost-coverage partial"><strong>部分计价</strong><span>下列金额仅包含已配置价格的模型；未计价 ${coverage.unpricedModels.length} 个：${e(coverage.unpricedModels.join("、"))}</span></div>`
       : `<div class="cost-coverage missing"><strong>未计价</strong><span>已用模型均未配置价格：${e(coverage.unpricedModels.join("、") || "请先在 Keeper 中设置模型成本")}</span></div>`;
@@ -539,18 +539,19 @@ function accountBody(account, data) {
       any = true;
       html +=
         table(
-          ["额度窗口", "剩余 / 已用", "重置时间", "周期 Token", "周期成本"],
-          quota.map((m) => [
-            m.label || m.key,
-            m.remainingFraction != null
-              ? `剩余 ${(m.remainingFraction * 100).toFixed(1)}%`
-              : m.usedPercent != null
-                ? `已用 ${Number(m.usedPercent).toFixed(1)}%`
-                : m.remaining || "—",
-            time(m.resetAt),
-            number(m.window_usage_tokens),
-            money(m.window_usage_cost),
-          ]),
+          ["额度窗口", "剩余额度", "重置时间", "周期 Token", "周期成本"],
+          quota.map((m) => {
+            const remaining = quotaRemaining(m);
+            return [
+              m.label || m.key,
+              remaining == null
+                ? m.remaining || "—"
+                : `${remaining.toFixed(1)}%`,
+              time(m.resetAt),
+              number(m.window_usage_tokens),
+              money(m.window_usage_cost),
+            ];
+          }),
           ["name", "text", "time", "number", "number"],
         ) +
         note(
@@ -632,9 +633,6 @@ function accountBody(account, data) {
           }),
         ["time", "text", "number", "number", "number", "number", "number"],
         "额度变化效率",
-      ) +
-      note(
-        "每百分点值 = 区间总量 ÷ 实际下降百分点；下降 1 个百分点时，两列数值相同。成本按同一区间动态计价后再除以下降百分点，缺少任一定价时显示 —。",
       )
     );
   }
@@ -711,14 +709,11 @@ const quotaItemsByAccount = (accounts, items) => {
   });
   return map;
 };
-const quotaUsage = (quota) => {
+const quotaRemaining = (quota) => {
   if (quota?.remainingFraction != null)
-    return Math.max(
-      0,
-      Math.min(100, (1 - Number(quota.remainingFraction)) * 100),
-    );
+    return Math.max(0, Math.min(100, Number(quota.remainingFraction) * 100));
   if (quota?.usedPercent != null)
-    return Math.max(0, Math.min(100, Number(quota.usedPercent)));
+    return Math.max(0, Math.min(100, 100 - Number(quota.usedPercent)));
   return null;
 };
 const healthBars = (health = {}) => {
@@ -802,8 +797,8 @@ function accountsOverview(data) {
           quotas.length
             ? quotas
                 .map((quota) => {
-                  const used = quotaUsage(quota);
-                  return `<div class="account-quota-line"><span><small title="${e(quota.label || quota.key || "额度")}">${e(quota.label || quota.key || "额度")}</small><strong class="num">${used == null ? "—" : `${used.toFixed(0)}%`}</strong></span><b><i style="width:${used ?? 0}%" class="${used >= 80 ? "warn" : ""}"></i></b></div>`;
+                  const remaining = quotaRemaining(quota);
+                  return `<div class="account-quota-line"><span><small title="${e(quota.label || quota.key || "额度")}">${e(quota.label || quota.key || "额度")}</small><strong class="num">${remaining == null ? "—" : `${remaining.toFixed(0)}%`}</strong></span><b><i style="width:${remaining ?? 0}%" class="${remaining != null && remaining <= 20 ? "warn" : ""}"></i></b></div>`;
                 })
                 .join("")
             : '<div class="account-quota-empty">暂无缓存额度</div>'

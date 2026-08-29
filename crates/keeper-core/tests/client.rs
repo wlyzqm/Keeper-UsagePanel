@@ -181,7 +181,7 @@ async fn readonly_account_quota_and_request_routes() {
     assert!(requests[7].contains("source=auth%2Findex"));
     assert!(requests.iter().all(|request| request
         .to_lowercase()
-        .contains("user-agent: keeper-usagepanel_0.5.1 admin")));
+        .contains("user-agent: keeper-usagepanel_0.5.2 admin")));
 }
 
 #[tokio::test]
@@ -429,7 +429,7 @@ async fn sk_uses_only_own_endpoints_and_rejects_admin_views() {
     assert!(requests[0].contains(r#""apiKey":"sk-fixture-only""#));
     assert!(requests[0]
         .to_lowercase()
-        .contains("user-agent: keeper-usagepanel_0.5.1 sk"));
+        .contains("user-agent: keeper-usagepanel_0.5.2 sk"));
     assert!(requests[1].contains("/auth/session "));
     assert!(requests[3].contains("key-activity?range=5h"));
     assert!(requests

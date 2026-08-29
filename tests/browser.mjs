@@ -117,6 +117,14 @@ try {
       { quotas: 3, columns: 3 },
     ],
   );
+  assert.deepEqual(
+    await page
+      .locator(".account-overview-card")
+      .first()
+      .locator(".account-quota-line strong")
+      .allTextContents(),
+    ["82%", "66%", "72%", "93%"],
+  );
   await page.locator(".panel-content").evaluate((el) => {
     el.scrollTop = el.scrollHeight;
   });
@@ -179,10 +187,9 @@ try {
         ).slice(1),
         ["100% → 82%", "18", "1,408,230", "78,235", "$4.38", "$0.2433"],
       );
-      assert.ok(
-        (await page.locator(".note").last().innerText()).includes(
-          "区间总量 ÷ 实际下降百分点",
-        ),
+      assert.equal(
+        await page.getByText("每百分点值 = 区间总量 ÷ 实际下降百分点").count(),
+        0,
       );
       const efficiencyTop = page.locator(".request-table-scroll");
       const efficiencyBody = page.locator(".request-table-wrap");
@@ -330,7 +337,7 @@ try {
   await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
   await page.locator('[data-settings-tab="updates"]').click();
   assert.ok(
-    (await page.locator("#update-center").innerText()).includes("0.5.1"),
+    (await page.locator("#update-center").innerText()).includes("0.5.2"),
   );
   await page.screenshot({ path: ".cache/screenshots/settings-updates.png" });
   await page.locator('[data-action="check-update"]').click();
@@ -558,6 +565,10 @@ try {
     const quota = page.locator(".table-wrap").first();
     await quota.waitFor();
     await quota.scrollIntoViewIfNeeded();
+    assert.deepEqual(
+      await quota.locator("tbody tr td:nth-child(2)").allTextContents(),
+      ["82.0%", "66.0%", "72.0%", "93.0%"],
+    );
     assert.ok(
       await quota.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
       "Normal quota table must fit without horizontal scrolling",
@@ -713,6 +724,11 @@ try {
     await page.evaluate(() => window.__previewUpdateAction),
     "skip_update",
   );
+  await page.goto("http://127.0.0.1:1420/?preview=1&cost=complete");
+  await page.locator("[data-tab=analysis]").click();
+  await page.locator(".metric-card").first().waitFor();
+  assert.equal(await page.locator(".cost-coverage").count(), 0);
+  await page.screenshot({ path: ".cache/screenshots/cost-complete.png" });
   await page.goto("http://127.0.0.1:1420/?preview=1&cost=partial");
   await page.locator("[data-tab=analysis]").click();
   await page.locator(".cost-coverage").waitFor();
@@ -929,7 +945,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, four-section settings and manual update, passive update entry, complete/partial costs with the all-unpriced panel hidden, all-account summary, three- and four-quota card layouts, compact account detail, full-width synchronized request/quota-efficiency sliders, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
+    "PASS: browser rendering, four-section settings and manual update, passive update entry, complete/partial cost notices, all-account summary, three- and four-quota card layouts with remaining percentages, compact account detail, full-width synchronized request/quota-efficiency sliders without the clipped footer note, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
   );
 } finally {
   await browser?.close();
