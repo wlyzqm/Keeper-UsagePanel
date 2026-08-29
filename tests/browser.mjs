@@ -337,7 +337,7 @@ try {
   await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
   await page.locator('[data-settings-tab="updates"]').click();
   assert.ok(
-    (await page.locator("#update-center").innerText()).includes("0.5.3"),
+    (await page.locator("#update-center").innerText()).includes("0.5.4"),
   );
   await page.screenshot({ path: ".cache/screenshots/settings-updates.png" });
   await page.locator('[data-action="check-update"]').click();
@@ -971,9 +971,33 @@ try {
       await context.close();
     }
   }
+  {
+    const context = await browser.newContext({
+      viewport: { width: 34, height: 74 },
+    });
+    try {
+      const racePage = await context.newPage();
+      await racePage.goto(
+        "http://127.0.0.1:1420/?preview=1&window=widget&standalone&manual&edgeRace=1",
+      );
+      const raceWidget = racePage.locator(
+        ".widget-wrap.widget-layout-ready.edge-collapsed[data-edge=right]",
+      );
+      await raceWidget.waitFor();
+      assert.equal(
+        await racePage
+          .locator(".widget-total")
+          .evaluate((el) => getComputedStyle(el).display),
+        "none",
+        "A stale pre-restore query must not overwrite the final collapsed event",
+      );
+    } finally {
+      await context.close();
+    }
+  }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser rendering, four-section settings and manual update, passive update entry, complete/partial cost notices, all-account summary, three- and four-quota card layouts with remaining percentages, compact account detail, full-width synchronized request/quota-efficiency sliders without the clipped footer note, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, contrast and DPI rendering.",
+    "PASS: browser rendering, four-section settings and manual update, passive update entry, complete/partial cost notices, all-account summary, three- and four-quota card layouts with remaining percentages, compact account detail, full-width synchronized request/quota-efficiency sliders without the clipped footer note, key/date filters, sk permissions, themes, error states, native-size and docked-edge layouts, startup edge-state races, contrast and DPI rendering.",
   );
 } finally {
   await browser?.close();

@@ -261,6 +261,7 @@ function widget() {
 function applyWidgetEdge(next = {}) {
   const wrap = $("#widget-wrap");
   if (!wrap) return;
+  if (next.ready === false) return;
   const side = next.side === "left" || next.side === "right" ? next.side : "";
   wrap.classList.toggle("edge-collapsed", !!side && next.collapsed === true);
   if (side) wrap.dataset.edge = side;
@@ -1082,7 +1083,7 @@ root.innerHTML = preview
       : panel();
 
 // The native window may already be restored at its 34 DIP collapsed width.
-// Resolve that layout before painting the widget so the 216 DIP layout cannot flash clipped.
+// Ignore pre-restore query results so they cannot overwrite the final native edge event.
 if ($("#widget")) {
   await api.on("widget-edge", applyWidgetEdge);
   try {

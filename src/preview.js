@@ -145,6 +145,19 @@ export function createPreview(search) {
       window.__previewCalls.push({ command, args });
       if (command === "open_console") return;
       if (command === "widget_edge_state") {
+        if (search.has("edgeRace")) {
+          setTimeout(
+            () =>
+              emit("widget-edge", {
+                side: "right",
+                collapsed: true,
+                ready: true,
+              }),
+            25,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return { side: null, collapsed: false, ready: false };
+        }
         const edgeDelay = Math.min(
           1000,
           Math.max(0, Number(search.get("edgeDelay")) || 0),
@@ -154,7 +167,11 @@ export function createPreview(search) {
         const side = ["left", "right"].includes(search.get("edge"))
           ? search.get("edge")
           : null;
-        return { side, collapsed: !!side && search.get("expanded") !== "1" };
+        return {
+          side,
+          collapsed: !!side && search.get("expanded") !== "1",
+          ready: true,
+        };
       }
       if (command === "get_access") return structuredClone(access);
       if (command === "set_scope") {

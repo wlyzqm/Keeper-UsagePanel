@@ -24,6 +24,7 @@ struct Dock {
 pub struct WidgetEdgeState {
     side: Option<EdgeSide>,
     collapsed: bool,
+    ready: bool,
 }
 
 #[derive(Default)]
@@ -33,6 +34,7 @@ pub struct Hover {
     entered: Option<Instant>,
     left: Option<Instant>,
     dock: Option<Dock>,
+    edge_ready: bool,
     fullscreen_hidden: bool,
     fullscreen_checked: Option<Instant>,
 }
@@ -62,6 +64,7 @@ pub fn edge_state(hover: &Hover) -> WidgetEdgeState {
     WidgetEdgeState {
         side: hover.dock.map(|dock| dock.side),
         collapsed: hover.dock.is_some_and(|dock| !dock.expanded),
+        ready: hover.edge_ready,
     }
 }
 
@@ -179,6 +182,14 @@ mod tests {
             hover.update(true, later + Duration::from_millis(180)),
             (true, false)
         );
+    }
+
+    #[test]
+    fn edge_state_is_not_ready_until_native_restore_finishes() {
+        let mut hover = Hover::default();
+        assert!(!edge_state(&hover).ready);
+        hover.edge_ready = true;
+        assert!(edge_state(&hover).ready);
     }
 
     #[test]
@@ -353,6 +364,13 @@ pub fn create(app: &tauri::AppHandle) -> tauri::Result<()> {
     if restore_edge && config.edge_auto_collapse {
         dock_if_near(app, &widget, 12.);
     }
+    let restored_edge = {
+        let state = app.state::<AppState>();
+        let mut hover = state.hover.lock().unwrap();
+        hover.edge_ready = true;
+        edge_state(&hover)
+    };
+    emit_edge(&widget, restored_edge);
     use tauri::menu::{Menu, MenuItem};
     let show = MenuItem::with_id(app, "show", "显示悬浮球", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "settings", "连接设置", true, None::<&str>)?;
