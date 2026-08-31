@@ -921,6 +921,37 @@ summary::-webkit-details-marker {
   top: 0;
   box-shadow: inset 0 -1px var(--line);
 }
+.panel-content.quota-history-view {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+.quota-cycle-wrap {
+  max-height: 210px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--accent) 55%, var(--line))
+    var(--soft);
+}
+.quota-cycle-wrap .data-table th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  box-shadow: inset 0 -1px var(--line);
+}
+.quota-history-view::-webkit-scrollbar,
+.quota-cycle-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.quota-history-view::-webkit-scrollbar-track,
+.quota-cycle-wrap::-webkit-scrollbar-track {
+  background: var(--soft);
+}
+.quota-history-view::-webkit-scrollbar-thumb,
+.quota-cycle-wrap::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
 .empty-inline {
   padding: 22px 10px;
   text-align: center;

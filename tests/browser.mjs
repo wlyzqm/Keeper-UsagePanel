@@ -237,6 +237,37 @@ try {
       });
     }
   }
+  await page.goto("http://127.0.0.1:1420/?preview=1&state=resets");
+  await page.locator("[data-tab=accounts]").click();
+  await page.locator("[data-account-open]").first().click();
+  await page
+    .locator('[data-pick=accountTab][data-value="quota-history"]')
+    .click();
+  await page.locator(".quota-cycle-wrap").waitFor();
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const content = document.querySelector(".panel-content");
+      const cycles = document.querySelector(".quota-cycle-wrap");
+      const efficiency = document.querySelector(".efficiency-table-frame");
+      return {
+        rows: cycles.querySelectorAll("tbody tr").length,
+        outerScroll: getComputedStyle(content).overflowY,
+        cyclesScroll: cycles.scrollHeight > cycles.clientHeight,
+        cyclesHeight: Math.round(cycles.getBoundingClientRect().height),
+        stickyHeader: getComputedStyle(cycles.querySelector("th")).position,
+        efficiencyHeight: Math.round(efficiency.getBoundingClientRect().height),
+      };
+    }),
+    {
+      rows: 8,
+      outerScroll: "scroll",
+      cyclesScroll: true,
+      cyclesHeight: 210,
+      stickyHeader: "sticky",
+      efficiencyHeight: 150,
+    },
+  );
+  await page.screenshot({ path: ".cache/screenshots/quota-many-resets.png" });
   await page.goto("http://127.0.0.1:1420/?preview=1&theme=dark");
   await page.locator(".metric-value").first().waitFor();
   await page.screenshot({ path: ".cache/screenshots/overview-dark.png" });
@@ -337,7 +368,7 @@ try {
   await page.screenshot({ path: ".cache/screenshots/settings-behavior.png" });
   await page.locator('[data-settings-tab="updates"]').click();
   assert.ok(
-    (await page.locator("#update-center").innerText()).includes("0.5.5"),
+    (await page.locator("#update-center").innerText()).includes("0.5.6"),
   );
   await page.screenshot({ path: ".cache/screenshots/settings-updates.png" });
   await page.locator('[data-action="check-update"]').click();

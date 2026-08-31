@@ -607,6 +607,7 @@ function accountBody(account, data) {
           cost(c.usage, "total_cost_usd"),
         ]),
         ["text", "time", "text", "number", "number", "number"],
+        "quota-cycle-wrap",
       ) +
       heading("额度变化效率") +
       requestTable(
@@ -845,11 +846,16 @@ function renderData() {
     state.tab === "accounts" &&
     state.accountDetail &&
     ["requests", "quota-history"].includes(state.accountTab);
+  const quotaHistoryView =
+    state.tab === "accounts" &&
+    state.accountDetail &&
+    state.accountTab === "quota-history";
   content.classList.toggle(
     "account-detail-view",
     state.tab === "accounts" && state.accountDetail,
   );
   content.classList.toggle("request-view", requestView);
+  content.classList.toggle("quota-history-view", quotaHistoryView);
   content.innerHTML = renders[state.tab](state.data);
   if (requestView) setupRequestTableScroll();
 }
@@ -898,6 +904,7 @@ async function load(background = false) {
   state.loading = true;
   if (!background) {
     $("#content").classList.remove("request-view");
+    $("#content").classList.remove("quota-history-view");
     $("#content").innerHTML =
       '<div class="skeleton"></div><div class="skeleton short"></div><div class="skeleton"></div>';
   }

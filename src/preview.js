@@ -433,9 +433,10 @@ export function createPreview(search) {
         case "quota-history":
           return {
             supported: true,
-            cycles: [
-              {
-                status: "current",
+            cycles: Array.from(
+              { length: search.get("state") === "resets" ? 8 : 1 },
+              (_, index) => ({
+                status: index ? "ended" : "current",
                 window_started_at: sample.sampled_at,
                 reset_at: sample.sampled_at,
                 first_remaining_percent: 100,
@@ -462,8 +463,8 @@ export function createPreview(search) {
                     },
                   },
                 ],
-              },
-            ],
+              }),
+            ),
           };
         case "requests":
           return {

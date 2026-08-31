@@ -91,9 +91,8 @@ jobs:
           portable = 'KeeperUsagePanel.exe'
           installed = f'KeeperUsagePanel_{version}_x64-setup.exe'
           notes = '\n'.join([
-              '- 修复启动最终边缘状态事件先于 WebView 监听器到达时，悬浮球一直不可见的问题。',
-              '- 启动查询遇到原生窗口尚未就绪时会继续握手，直到取得展开或收起的最终布局。',
-              '- 更新检查改用 Release 固定清单，不再消耗 GitHub REST API 的共享 IP 额度。',
+              '- 额度历史页恢复稳定的外层纵向滚动，页面内容始终可达。',
+              '- 额度周期在重置记录较多时改为内部滚动并固定表头，不再挤压额度变化效率表。',
           ])
           update = {
               'version': version,
@@ -157,9 +156,8 @@ jobs:
             const body = [
               `Windows 10 / 11 x64 · Keeper UsagePanel ${version}`,
               '',
-              '- 修复启动最终边缘状态事件先于 WebView 监听器到达时，悬浮球一直不可见的问题。',
-              '- 启动查询遇到原生窗口尚未就绪时会继续握手，直到取得展开或收起的最终布局。',
-              '- 更新检查改用 Release 固定清单，不再消耗 GitHub REST API 的共享 IP 额度。',
+              '- 额度历史页恢复稳定的外层纵向滚动，页面内容始终可达。',
+              '- 额度周期在重置记录较多时改为内部滚动并固定表头，不再挤压额度变化效率表。',
               `- Keeper 请求按管理员或 sk 登录写入 Keeper-UsagePanel_${version} User-Agent；未改变连接参数时保存设置不重复登录。`,
               '- setup.exe：安装版；缺少 WebView2 时联网安装。',
               '- win-x64.zip：便携版、使用说明与界面预览；需已有 WebView2。',
